@@ -107,18 +107,22 @@ class GitHubTransport:
         descriptor = os.open(self.ssh_config, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, 'w') as stream:
             stream.write(configuration + '\n')
-        self.capture(self.ssh_args(f'mkdir -p {shlex.quote(self.base + "/incoming")} && chmod 700 {shlex.quote(self.base)}'))
+        command = f'mkdir -p {shlex.quote(self.base + "/incoming")} && chmod 700 {shlex.quote(self.base)}'
+        # The provider proxy can resume the Codespace before SSH receives a banner.
+        self.capture(self.ssh_args(command, connect_timeout=180))
         helper = Path(__file__).with_name('runner.py')
         helper_hash = hashlib.sha256(helper.read_bytes()).hexdigest()[:16]
         self.runner = f'{self.base}/runner-{helper_hash}.py'
         self.capture(self.transfer_args() + [str(helper), f'{self.host}:{self.runner}'])
 
-    def ssh_args(self, command):
-        return ['ssh', '-F', str(self.ssh_config), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30',
+    def ssh_args(self, command, *, connect_timeout=30):
+        return ['ssh', '-F', str(self.ssh_config), '-o', 'BatchMode=yes', '-o', f'ConnectTimeout={connect_timeout}',
+                '-o', 'LogLevel=ERROR',
                 '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', self.host, command]
 
     def transfer_args(self):
         ssh = shlex.join(['ssh', '-F', str(self.ssh_config), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30',
+                          '-o', 'LogLevel=ERROR',
                           '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'])
         return ['rsync', '-rtp', '--checksum', '-e', ssh]
 
