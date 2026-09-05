@@ -28,6 +28,8 @@ if name == 'gh':
         print(json.dumps({'machines':[{'name':'fixture-machine','cpus':2,'memory_in_bytes':8589934592}]}))
     elif args[:2] == ['codespace','list']:
         print(json.dumps(state))
+    elif args[:2] == ['codespace','view']:
+        print(json.dumps(state[0]))
     elif args[:2] == ['codespace','create']:
         state=[{'name':'fixture-space','displayName':args[args.index('--display-name')+1], 'state':'Available','repository':{'nameWithOwner':'example/project'}}]
         state_path.write_text(json.dumps(state)); print('fixture-space')

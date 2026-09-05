@@ -16,6 +16,7 @@ class LocalProvider:
     """Only the provider boundary is replaced; run the real remote transaction."""
     def __init__(self, base):
         self.base = base
+        self.interactive_base = base
         self.environments = []
         self.creations = 0
         self.fail_upload = False
@@ -30,13 +31,20 @@ class LocalProvider:
     def list_codespaces(self, repository):
         return self.environments
 
+    def creation_label(self, root, branch=None):
+        return branch or 'fixture'
+
+    def codespace_metadata(self, name):
+        return next(item for item in self.environments if item['name'] == name)
+
     def create(self, repository, display_name, config, branch=None, machine=None):
         self.creations += 1
         self.environments.append({'name': 'fixture-environment', 'displayName': display_name, 'state': 'Available', 'repository': {'nameWithOwner': repository}})
         return 'fixture-environment'
 
-    def connect(self, name, identity):
-        self.base.mkdir(exist_ok=True)
+    def connect(self, name, identity, workspace='interactive'):
+        self.base = self.interactive_base / 'validation' if workspace == 'validation' else self.interactive_base
+        self.base.mkdir(parents=True, exist_ok=True)
         self.environments[0]['state'] = 'Available'
 
     def upload(self, snapshot, transaction_id):
@@ -63,7 +71,7 @@ class LocalProvider:
     def stop(self, name):
         self.environments[0]['state'] = 'Shutdown'
 
-    def stop_services(self):
+    def stop_services(self, workspace=None):
         runner = Path(__file__).parents[1] / 'redev/runner.py'
         subprocess.run([sys.executable, str(runner), str(self.base), 'stop'], check=True, capture_output=True)
 
@@ -102,7 +110,8 @@ class WorkflowTest(unittest.TestCase):
         with self.assertRaisesRegex(TransportError, 'connection lost'):
             self.app.check('types')
         self.assertEqual((self.provider.base / 'source/source.txt').read_text(), 'uncommitted version')
-        self.assertIsNone(self.store.read().get('lastCheck'))
+        self.assertEqual(self.store.read()['lastCheck']['exit'], 70)
+        self.assertIsNone(self.store.read()['lastCheck']['remoteExit'])
 
     def test_successful_check_becomes_stale_when_local_source_changes(self):
         self.app.up(no_watch=True)
@@ -117,10 +126,10 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(self.app.check('types'), 23)
         self.assertTrue(self.store.read()['lastCheck']['stale'])
 
-    def test_check_requires_opt_in_and_never_creates_environment(self):
-        with self.assertRaisesRegex(RuntimeError, 'up'):
-            self.app.check('types')
-        self.assertEqual(self.provider.creations, 0)
+    def test_check_can_create_a_validation_environment_without_up(self):
+        self.assertEqual(self.app.check('types'), 23)
+        self.assertEqual(self.provider.creations, 1)
+        self.assertEqual(self.store.read()['workspace'], 'validation')
 
     def test_stop_preserves_data_mapping_and_opt_in(self):
         self.app.up(no_watch=True)

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import signal
 import socket
 import stat
@@ -17,6 +18,8 @@ import time
 
 
 FAILURE = 70
+ACTIVITY_INTERVAL = 30
+SETUP_EXECUTION_VERSION = 2
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
 PROTECTED_PARTS = {
@@ -115,14 +118,26 @@ def validate_request(request):
     config = request.get("config")
     if not isinstance(config, dict) or config.get("version") != 1:
         raise RunnerError("Unsupported configuration version")
-    for field in ("setup", "prepare"):
+    for field in ("setup", "prepare", "servicePrepare"):
         if field in config and not isinstance(config[field], str):
             raise RunnerError(field + " must be a command string")
     checks = config.get("checks", {})
-    if not isinstance(checks, dict) or not all(isinstance(name, str) and isinstance(command, str) for name, command in checks.items()):
+    if not isinstance(checks, dict):
         raise RunnerError("Invalid checks")
-    if request.get("check") is not None and request["check"] not in checks:
-        raise RunnerError("Unknown check")
+    for name, settings in checks.items():
+        if not isinstance(name, str):
+            raise RunnerError("Invalid check name")
+        check_invocation(settings)
+    selected = selected_checks(request)
+    if any(name not in checks for name in selected) or len(set(selected)) != len(selected):
+        raise RunnerError("Unknown or duplicate check")
+    arguments = request.get("checkArgs", [])
+    if not isinstance(arguments, list) or any(not isinstance(argument, str) or "\x00" in argument for argument in arguments):
+        raise RunnerError("Check arguments must be strings")
+    if arguments and (len(selected) != 1 or not isinstance(checks[selected[0]], dict)):
+        raise RunnerError("Arguments require one structured check")
+    if not isinstance(request.get("checkOnly", False), bool):
+        raise RunnerError("checkOnly must be a boolean")
     if not isinstance(request.get("startServices", False), bool):
         raise RunnerError("startServices must be a boolean")
     if not isinstance(request.get("snapshotId"), str) or not HASH.fullmatch(request["snapshotId"]):
@@ -134,6 +149,10 @@ def validate_request(request):
     sync = config.get("sync", {})
     if not isinstance(sync, dict):
         raise RunnerError("Invalid sync configuration")
+    if sync.get("mode", "restart") not in ("restart", "live"):
+        raise RunnerError("Invalid sync mode")
+    if type(sync.get("seedGenerated", False)) is not bool:
+        raise RunnerError("seedGenerated must be a boolean")
     for values in (sync.get("exclude", []), sync.get("generated", []), config.get("setupInputs", [])):
         if not isinstance(values, list):
             raise RunnerError("Path prefixes must be arrays")
@@ -150,6 +169,9 @@ def validate_request(request):
             raise RunnerError("Invalid named port")
     if len({name.upper().replace("-", "_") for name in ports}) != len(ports):
         raise RunnerError("Named ports produce duplicate environment variables")
+    schemes = config.get("portSchemes", {})
+    if not isinstance(schemes, dict) or any(name not in ports or scheme not in ("http", "https") for name, scheme in schemes.items()):
+        raise RunnerError("Invalid portSchemes")
     services = config.get("services", [])
     if not isinstance(services, list):
         raise RunnerError("Invalid services")
@@ -159,6 +181,8 @@ def validate_request(request):
             raise RunnerError("Invalid service name")
         if service["name"] in names or not isinstance(service.get("command"), str):
             raise RunnerError("Invalid or duplicate service")
+        if "when" in service and (not isinstance(service["when"], str) or not service["when"].strip() or "\x00" in service["when"]):
+            raise RunnerError("Invalid service condition")
         names.add(service["name"])
         if "port" in service and service["port"] not in ports:
             raise RunnerError("Unknown service port")
@@ -177,7 +201,46 @@ def validate_request(request):
             raise RunnerError("Invalid manifest hash: " + relative)
         if entry.get("mode") not in (0o644, 0o755):
             raise RunnerError("Invalid manifest mode: " + relative)
+    seeds = request.get("seedManifest", {})
+    if not isinstance(seeds, dict) or seeds and (not sync.get("seedGenerated") or request.get("checkOnly")):
+        raise RunnerError("Generated seeds require interactive seedGenerated mode")
+    for relative, entry in seeds.items():
+        relative_path(relative)
+        if (relative in manifest or not any(within_prefix(relative, prefix) for prefix in sync.get("generated", []))
+                or protected(relative, sync.get("exclude", []))):
+            raise RunnerError("Generated seed path is not allowed: " + relative)
+        if (not isinstance(entry, dict) or not isinstance(entry.get("sha256"), str)
+                or not HASH.fullmatch(entry["sha256"]) or entry.get("mode") not in (0o644, 0o755)):
+            raise RunnerError("Invalid generated seed record: " + relative)
     return config
+
+
+def selected_checks(request):
+    selected = request.get("checks")
+    if selected is None:
+        return [request["check"]] if request.get("check") is not None else []
+    if not isinstance(selected, list) or not selected or not all(isinstance(name, str) for name in selected):
+        raise RunnerError("checks must be a nonempty list of names")
+    if request.get("check") is not None:
+        raise RunnerError("Use checks or check, not both")
+    return selected
+
+
+def check_invocation(settings, arguments=()):
+    if isinstance(settings, str):
+        if not settings.strip() or "\x00" in settings or arguments:
+            raise RunnerError("Invalid shell check")
+        return ["bash", "-lc", settings], "."
+    if not isinstance(settings, dict) or set(settings) - {"argv", "cwd"}:
+        raise RunnerError("Invalid structured check")
+    argv = settings.get("argv")
+    if (not isinstance(argv, list) or not argv or not argv[0]
+            or any(not isinstance(argument, str) or "\x00" in argument for argument in argv)):
+        raise RunnerError("Invalid check argv")
+    cwd = settings.get("cwd", ".")
+    if cwd != ".":
+        relative_path(cwd)
+    return argv + list(arguments), cwd
 
 
 def file_hash(path):
@@ -191,7 +254,7 @@ def file_hash(path):
         return digest.hexdigest()
 
 
-def copy_file(source, destination, entry):
+def copy_file(source, destination, entry, overwrite=True):
     directory(destination.parent)
     descriptor, temporary = tempfile.mkstemp(prefix=".redev-", dir=destination.parent)
     try:
@@ -208,7 +271,13 @@ def copy_file(source, destination, entry):
             os.fchmod(output.fileno(), entry["mode"])
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, destination)
+        if overwrite:
+            os.replace(temporary, destination)
+        else:
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                pass
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -262,12 +331,32 @@ def update_source(base, request, previous):
     for target in sorted(removed_directories, key=lambda path: len(path.parts), reverse=True):
         target.rmdir()
     for relative, entry in manifest.items():
-        copy_file(incoming / relative, source / relative, entry)
+        target = source / relative
+        if (previous.get(relative) == entry and target.is_file() and not target.is_symlink()
+                and file_hash(target) == entry["sha256"]
+                and stat.S_IMODE(target.stat().st_mode) == entry["mode"]):
+            continue
+        copy_file(incoming / relative, target, entry)
 
 
 def incoming_directory(base, request):
     relative = "incoming" + ("/" + request["incomingId"] if "incomingId" in request else "")
     return inspect_path(base, relative, allow_missing=False)
+
+
+def seed_generated(base, request):
+    incoming = incoming_directory(base, request)
+    source = base / "source"
+    for relative, entry in request.get("seedManifest", {}).items():
+        staged = inspect_path(incoming, relative, allow_missing=False)
+        if file_hash(staged) != entry["sha256"]:
+            raise RunnerError("Generated seed hash mismatch: " + relative)
+        target = inspect_path(source, relative)
+        if not target.exists():
+            copy_file(staged, target, entry, overwrite=False)
+        target = inspect_path(source, relative, allow_missing=False)
+        if not target.is_file():
+            raise RunnerError("Generated seed destination is not a regular file: " + relative)
 
 
 def clean_incoming(base, request):
@@ -276,7 +365,7 @@ def clean_incoming(base, request):
         return
     incoming = incoming_directory(base, request)
     parents = {incoming}
-    for relative, entry in request["manifest"].items():
+    for relative, entry in {**request["manifest"], **request.get("seedManifest", {})}.items():
         path = inspect_path(incoming, relative)
         if path.exists():
             if file_hash(path) != entry["sha256"]:
@@ -293,24 +382,33 @@ def clean_incoming(base, request):
             pass
 
 
-def command_environment(ports):
+def command_environment(ports, schemes=None):
     environment = os.environ.copy()
     environment["REDEV_REMOTE"] = "1"
     for name, port in ports.items():
         suffix = name.upper().replace("-", "_")
         environment["REDEV_PORT_" + suffix] = str(port)
-        environment["REDEV_URL_" + suffix] = "http://localhost:" + str(port)
+        environment["REDEV_URL_" + suffix] = (schemes or {}).get(name, "http") + "://localhost:" + str(port)
     return environment
 
 
+def shell_argv(command_text, source):
+    return ["bash", "-lc", "cd -- " + shlex.quote(str(source)) + " || exit\n" + command_text]
+
+
 def command(command_text, source, environment, lock_descriptor):
+    argv = command_text if isinstance(command_text, list) else shell_argv(command_text, source)
     process = subprocess.Popen(
-        ["bash", "-lc", command_text], cwd=source, env=environment,
+        argv, cwd=source, env=environment,
         stdin=subprocess.DEVNULL, start_new_session=True, pass_fds=(lock_descriptor,),
     )
     try:
-        result = process.wait()
-        return result if result >= 0 else 128 - result
+        while True:
+            try:
+                result = process.wait(timeout=ACTIVITY_INTERVAL)
+                return result if result >= 0 else 128 - result
+            except subprocess.TimeoutExpired:
+                print("[redev] Remote command is still running.", flush=True)
     except BaseException:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -352,17 +450,45 @@ def service_alive(service):
                 and details["group"] == service.get("pid") and not details["zombie"])
 
 
+def process_group_active(group):
+    try:
+        response = subprocess.run(
+            ["ps", "-axo", "pgid=,stat="], capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return True
+    if response.returncode:
+        return True
+    for line in response.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            return True
+        if fields[0] == str(group) and not fields[1].startswith("Z"):
+            return True
+    return False
+
+
+def signal_process_group(group, requested_signal):
+    try:
+        os.killpg(group, requested_signal)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # macOS can deny signaling a group containing only a zombie.
+        if process_group_active(group):
+            raise
+        return False
+
+
 def stop_services(base, state):
     targets = []
     for service in state.get("services", []):
         details = process_details(service.get("pid"))
         if not details or details["identity"] != service.get("identity") or details["group"] != service.get("pid"):
             continue
-        try:
-            os.killpg(service["pid"], signal.SIGTERM)
+        if signal_process_group(service["pid"], signal.SIGTERM):
             targets.append(service)
-        except ProcessLookupError:
-            pass
     deadline = time.monotonic() + 3
     while any(service_alive(service) for service in targets) and time.monotonic() < deadline:
         time.sleep(0.05)
@@ -370,10 +496,7 @@ def stop_services(base, state):
         details = process_details(service.get("pid"))
         # The verified group can outlive its leader. A new leader must still match.
         if details is None or (details["identity"] == service.get("identity") and details["group"] == service["pid"]):
-            try:
-                os.killpg(service["pid"], signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            signal_process_group(service["pid"], signal.SIGKILL)
     if targets:
         time.sleep(0.05)
     atomic_json(base, "state.json", state)
@@ -387,7 +510,7 @@ def port_open(port):
         return False
 
 
-def start_services(base, state, config, ports, environment):
+def start_services(base, state, config, ports, environment, lock_descriptor):
     state["services"] = []
     atomic_json(base, "state.json", state)
     for settings in config.get("services", []):
@@ -395,6 +518,15 @@ def start_services(base, state, config, ports, environment):
         record = {"name": settings["name"], "log": str(log_path)}
         state["services"].append(record)
         try:
+            if settings.get("when"):
+                condition_exit = command(settings["when"], base / "source", environment, lock_descriptor)
+                record["conditionExit"] = condition_exit
+                if condition_exit == 3:
+                    record["skipped"] = True
+                    atomic_json(base, "state.json", state)
+                    continue
+                if condition_exit:
+                    raise RunnerError("Service condition failed with exit " + str(condition_exit))
             if "port" in settings:
                 record["port"] = ports[settings["port"]]
                 if port_open(record["port"]):
@@ -402,7 +534,7 @@ def start_services(base, state, config, ports, environment):
             descriptor = os.open(log_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
             with os.fdopen(descriptor, "ab") as log:
                 process = subprocess.Popen(
-                    ["bash", "-lc", settings["command"]], cwd=base / "source", env=environment,
+                    shell_argv(settings["command"], base / "source"), cwd=base / "source", env=environment,
                     stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                     start_new_session=True, close_fds=True,
                 )
@@ -440,7 +572,7 @@ def status(state):
     services = []
     for record in state.get("services", []):
         service = dict(record, active=service_alive(record))
-        if not service["active"] and state.get("desiredServices"):
+        if not service["active"] and not service.get("skipped") and state.get("desiredServices"):
             service.setdefault("error", "Service is not running")
         services.append(service)
     return {"snapshotId": state.get("snapshotId"), "desiredServices": state.get("desiredServices", False), "services": services}
@@ -489,24 +621,44 @@ def export_generated(base, config, previous):
 def run_transaction(base, request, state, lock_descriptor):
     metadata = request if isinstance(request, dict) else {}
     result = {"snapshotId": metadata.get("snapshotId"), "transactionId": metadata.get("transactionId"),
-              "checkExit": None, "success": False, "generated": {}}
+              "checkExit": None, "checks": [], "success": False, "generated": {}}
     try:
         config = validate_request(request)
+        selected = selected_checks(request)
         changed = state.get("snapshotId") != request["snapshotId"] or state.get("manifest") != request["manifest"]
         setup_manifest = {
             relative: entry for relative, entry in request["manifest"].items()
             if any(within_prefix(relative, prefix) for prefix in config.get("setupInputs", []))
         }
-        digest = hashlib.sha256(json.dumps([config, setup_manifest, request.get("ports", {})], sort_keys=True).encode()).hexdigest()
+        digest = hashlib.sha256(json.dumps([
+            SETUP_EXECUTION_VERSION, config, setup_manifest, request.get("ports", {})
+        ], sort_keys=True).encode()).hexdigest()
         setup_changed = state.get("setupDigest") != digest
-        state["desiredServices"] = state.get("desiredServices", False) or request.get("startServices", False)
+        state["desiredServices"] = (not request.get("checkOnly", False)
+                                    and (state.get("desiredServices", False) or request.get("startServices", False)))
         prepared = state.get("preparedSnapshotId") == request["snapshotId"]
         desired_alive = not state["desiredServices"] or (
             {service.get("name") for service in state.get("services", [])} == {service["name"] for service in config.get("services", [])}
-            and all(service_alive(service) for service in state.get("services", []))
+            and all(service.get("skipped") or service_alive(service) for service in state.get("services", []))
         )
-        if not changed and not setup_changed and prepared and state.get("transactionReady") and request.get("check") is None and desired_alive:
+        if (not changed and not setup_changed and prepared and state.get("transactionReady")
+                and not selected and desired_alive and not request.get("startServices", False)):
             result["generated"] = state.get("generated", {})
+            result["success"] = True
+            clean_incoming(base, request)
+            atomic_json(base, "state.json", state)
+            atomic_json(base, "result.json", result)
+            return 0
+        live_sync = (config.get("sync", {}).get("mode") == "live" and state["desiredServices"]
+                     and desired_alive and state.get("transactionReady") and not setup_changed
+                     and not selected and not request.get("startServices", False))
+        if live_sync:
+            update_source(base, request, state.get("manifest", {}))
+            seed_generated(base, request)
+            state.update(manifest=request["manifest"], snapshotId=request["snapshotId"],
+                         preparedSnapshotId=request["snapshotId"])
+            result["generated"] = export_generated(base, config, state.get("generated", {}))
+            state["generated"] = result["generated"]
             result["success"] = True
             clean_incoming(base, request)
             atomic_json(base, "state.json", state)
@@ -515,17 +667,18 @@ def run_transaction(base, request, state, lock_descriptor):
         state["transactionReady"] = False
         stop_services(base, state)
         update_source(base, request, state.get("manifest", {}))
+        seed_generated(base, request)
         state["manifest"] = request["manifest"]
         state["snapshotId"] = request["snapshotId"]
         atomic_json(base, "state.json", state)
-        environment = command_environment(request.get("ports", {}))
+        environment = command_environment(request.get("ports", {}), config.get("portSchemes", {}))
         if setup_changed:
             exit_code = command(config.get("setup", ""), base / "source", environment, lock_descriptor)
             if exit_code:
                 raise RunnerError("setup failed with exit " + str(exit_code))
             state["setupDigest"] = digest
             atomic_json(base, "state.json", state)
-        if changed or setup_changed or not prepared or request.get("check") is not None:
+        if changed or setup_changed or not prepared or selected:
             state.pop("preparedSnapshotId", None)
             atomic_json(base, "state.json", state)
             if config.get("prepare"):
@@ -534,13 +687,34 @@ def run_transaction(base, request, state, lock_descriptor):
                     raise RunnerError("prepare failed with exit " + str(exit_code))
             state["preparedSnapshotId"] = request["snapshotId"]
             atomic_json(base, "state.json", state)
-        if request.get("check") is not None:
-            result["checkExit"] = command(config["checks"][request["check"]], base / "source", environment, lock_descriptor)
+        if selected:
+            result["checkExit"] = 0
+            for name in selected:
+                argv, cwd = check_invocation(config["checks"][name], request.get("checkArgs", []))
+                source = base / "source"
+                working_directory = source if cwd == "." else inspect_path(source, cwd, allow_missing=False)
+                record = {"name": name, "argv": argv, "cwd": cwd, "exit": None, "startedAt": time.time()}
+                result["checks"].append(record)
+                atomic_json(base, "result.json", result)
+                if "checks" in request:
+                    verify_source(source, request["manifest"])
+                    print("[redev] Running check: " + name, flush=True)
+                invocation = config["checks"][name] if isinstance(config["checks"][name], str) else argv
+                record["exit"] = command(invocation, working_directory, environment, lock_descriptor)
+                record["finishedAt"] = time.time()
+                result["checkExit"] = result["checkExit"] or record["exit"]
+                atomic_json(base, "result.json", result)
+                if "checks" in request:
+                    verify_source(source, request["manifest"])
+        if state["desiredServices"] and config.get("servicePrepare"):
+            exit_code = command(config["servicePrepare"], base / "source", environment, lock_descriptor)
+            if exit_code:
+                raise RunnerError("servicePrepare failed with exit " + str(exit_code))
         result["generated"] = export_generated(base, config, state.get("generated", {}))
         state["generated"] = result["generated"]
         atomic_json(base, "state.json", state)
         if state["desiredServices"]:
-            start_services(base, state, config, request.get("ports", {}), environment)
+            start_services(base, state, config, request.get("ports", {}), environment, lock_descriptor)
         result["success"] = result["checkExit"] in (None, 0)
         if result["success"]:
             clean_incoming(base, request)
@@ -556,6 +730,13 @@ def run_transaction(base, request, state, lock_descriptor):
         atomic_json(base, "result.json", result)
         print(result["error"], file=sys.stderr)
         return FAILURE
+
+
+def verify_source(source, manifest):
+    for relative, entry in manifest.items():
+        path = inspect_path(source, relative, allow_missing=False)
+        if not path.is_file() or file_hash(path) != entry["sha256"] or stat.S_IMODE(path.stat().st_mode) != entry["mode"]:
+            raise RunnerError("Check changed source in the requested snapshot: " + relative)
 
 
 def interrupted(signum, frame):

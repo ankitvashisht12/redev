@@ -64,11 +64,20 @@ def file_record(path):
     return {'sha256': digest.hexdigest(), 'mode': 0o755 if before.st_mode & 0o111 else 0o644}
 
 
-def source_files(root, config):
+def source_files(root, config, include_generated=False):
     result = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], check=True, capture_output=True)
+    tracked = set()
+    if include_generated:
+        tracked_files = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--cached'], check=True, capture_output=True)
+        tracked = {os.fsdecode(name) for name in tracked_files.stdout.split(b'\0') if name}
     for name in sorted(set(os.fsdecode(name) for name in result.stdout.split(b'\0') if name)):
         if excluded(name, config):
-            continue
+            generated_source = (include_generated and name in tracked
+                                and under(name, config.get('sync', {}).get('generated', []))
+                                and not sensitive(name)
+                                and not under(name, config.get('sync', {}).get('exclude', [])))
+            if not generated_source:
+                continue
         path = safe_file(root, name)
         if path.is_dir():
             index_entry = subprocess.run(['git', '-C', str(root), 'ls-files', '--stage', '--', name], check=True, capture_output=True).stdout
@@ -79,8 +88,14 @@ def source_files(root, config):
             yield name, path
 
 
-def source_manifest(root, config):
-    return {name: file_record(path) for name, path in source_files(root, config)}
+def source_manifest(root, config, include_generated=False):
+    return {name: file_record(path) for name, path in source_files(root, config, include_generated)}
+
+
+def tracked_generated_manifest(root, config):
+    prefixes = config.get('sync', {}).get('generated', [])
+    return {name: file_record(path) for name, path in source_files(root, config, include_generated=True)
+            if under(name, prefixes)}
 
 
 def manifest_id(manifest):
@@ -93,24 +108,29 @@ def change_stamp(root, config):
 
 
 class Snapshot:
-    def __init__(self, root, config):
+    def __init__(self, root, config, include_generated=False):
         self.temporary = tempfile.TemporaryDirectory(prefix='redev-snapshot-')
         self.directory = Path(self.temporary.name)
+        seed_generated = config.get('sync', {}).get('seedGenerated', False) and not include_generated
         try:
             for attempt in range(3):
                 try:
-                    manifest = source_manifest(root, config)
-                    for name, record in manifest.items():
+                    manifest = source_manifest(root, config, include_generated)
+                    seeds = tracked_generated_manifest(root, config) if seed_generated else {}
+                    for name, record in {**manifest, **seeds}.items():
                         target = self.directory / name
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copyfile(safe_file(root, name), target)
                         target.chmod(record['mode'])
                         if file_record(target) != record:
                             raise SourceChanged(f'File changed while copying: {name}')
-                    if source_manifest(root, config) != manifest:
+                    if source_manifest(root, config, include_generated) != manifest:
                         raise SourceChanged('Source changed while making the snapshot')
+                    if seed_generated and tracked_generated_manifest(root, config) != seeds:
+                        raise SourceChanged('Generated seeds changed while making the snapshot')
                     self.manifest = manifest
-                    self.identity = manifest_id(manifest)
+                    self.seed_manifest = seeds
+                    self.identity = manifest_id({'source': manifest, 'seeds': seeds}) if seeds else manifest_id(manifest)
                     break
                 except (SourceChanged, FileNotFoundError):
                     for child in self.directory.iterdir():

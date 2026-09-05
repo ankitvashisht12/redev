@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 
 from . import __version__
@@ -22,8 +23,13 @@ def parser():
     up.add_argument('--replace', action='store_true', help='Create a replacement only when the old mapping is missing or creation is uncertain')
     up.add_argument('--branch', help='Published branch containing the devcontainer recipe for initial creation')
     up.add_argument('--machine', help='Codespaces machine name for initial creation')
-    check = commands.add_parser('check', help='Resume, sync, run one configured remote check, preserve its exit code')
-    check.add_argument('name', help='Name from customizations.redev.checks')
+    check = commands.add_parser('check', help='Create or resume, sync once, and run selected checks; append runner arguments after --')
+    check.add_argument('names', nargs='+', help='Names from customizations.redev.checks')
+    check.add_argument('--stop', action='store_true', help='Use the validation source and stop the Codespace after success, failure, or interruption')
+    check.add_argument('--codespace', help='Adopt an existing Codespace in this account and repository')
+    check.add_argument('--replace', action='store_true', help='Create a replacement when the old mapping is missing or creation is uncertain')
+    check.add_argument('--branch', help='Published branch containing the devcontainer recipe for initial creation')
+    check.add_argument('--machine', help='Codespaces machine name for initial creation')
     commands.add_parser('sync', help='Flush a coherent source snapshot to the mapped environment')
     status = commands.add_parser('status', help='Show mapping, sync state, services, and private URLs; do not resume')
     status.add_argument('--json', action='store_true', help='Print complete machine-readable status')
@@ -36,7 +42,19 @@ def parser():
 
 
 def main(argv=None):
-    arguments = parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    runner_arguments = []
+    if '--' in argv:
+        separator = argv.index('--')
+        runner_arguments = argv[separator + 1:]
+        argv = argv[:separator]
+    argument_parser = parser()
+    arguments = argument_parser.parse_args(argv)
+    if runner_arguments and arguments.command != 'check':
+        argument_parser.error('Arguments after -- are supported only for check')
+    previous_signal = None
+    if arguments.command == 'check':
+        previous_signal = signal.signal(signal.SIGTERM, interrupted)
     try:
         root = worktree_root(arguments.root)
         os.chdir(root)
@@ -60,7 +78,9 @@ def main(argv=None):
             print_status(app.status())
             return code
         if arguments.command == 'check':
-            return app.check(arguments.name)
+            return app.check(arguments.names, stop=arguments.stop, arguments=runner_arguments,
+                             codespace=arguments.codespace, replace=arguments.replace,
+                             branch=arguments.branch, machine=arguments.machine)
         if arguments.command == 'sync':
             return app.sync()
         if arguments.command == 'status':
@@ -81,17 +101,37 @@ def main(argv=None):
     except (OSError, RuntimeError, ValueError) as error:
         print(f'redev: {error}', file=sys.stderr)
         return 70
+    finally:
+        if previous_signal is not None:
+            signal.signal(signal.SIGTERM, previous_signal)
+
+
+def interrupted(signum, frame):
+    raise KeyboardInterrupt
 
 
 def format_status(status):
     if not status.get('enabled'):
-        return 'This worktree is not enabled. Use gh redev up to opt in.'
-    lines = [f'Worktree: {status["root"]}', f'Codespace: {status.get("codespace", "creation pending")} ({status.get("codespaceState", "unknown")})',
-             f'Sync: {status.get("syncStatus", "not started")}; watcher: {"running" if status.get("workerRunning") else "stopped"}']
+        return 'This worktree has no enabled mapping. Use gh redev check NAME or gh redev up.'
+    lines = [f'Worktree: {status["root"]}', f'Repository: {status.get("repository", "not selected")}',
+             f'Codespace: {status.get("displayName") or status.get("codespace", "creation pending")} ({status.get("codespaceState", "unknown")})']
+    if status.get('machineDisplayName') or status.get('machineName'):
+        lines.append('Machine: ' + (status.get('machineDisplayName') or status['machineName']))
+    owner = status.get('billableOwner')
+    if owner:
+        lines.append('Paid by: ' + (owner.get('login', 'unknown') if isinstance(owner, dict) else str(owner)))
+    if status.get('idleTimeoutMinutes') is not None:
+        lines.append(f'Idle timeout: {status["idleTimeoutMinutes"]} minutes')
+    if status.get('retentionPeriodDays') is not None:
+        lines.append(f'Retention: {status["retentionPeriodDays"]} days; expiry: {status.get("retentionExpiresAt") or "not scheduled"}')
+    readiness = status.get('readiness', {})
+    lines.append(f'Setup: {readiness.get("setup", "not observed")}; services: {readiness.get("services", "not observed")} (passive status)')
+    lines.append(f'Sync: {status.get("syncStatus", "not started")}; watcher: {"running" if status.get("workerRunning") else "stopped"}')
     for name, url in status.get('urls', {}).items():
         lines.append(f'{name}: {url}')
     for service in status.get('remoteStatus', {}).get('services', []):
-        lines.append(f'Service {service["name"]}: {"running" if service.get("active") else "stopped"} (last observed status)')
+        service_state = 'skipped' if service.get('skipped') else 'running' if service.get('active') else 'stopped'
+        lines.append(f'Service {service["name"]}: {service_state} (last observed status)')
     for error in (status.get('lastError'), status.get('statusError'), status.get('workerStatus', {}).get('error')):
         if error:
             lines.append('Error: ' + error)

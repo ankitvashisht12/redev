@@ -21,7 +21,7 @@ class TransportTest(unittest.TestCase):
                 transport = GitHubTransport(directory)
                 transport.connect('example', 'a' * 32)
                 transport.upload(directory / 'snapshot', 'b' * 32)
-            rsync = next(args for args in calls if args[0] == 'rsync')
+            rsync = next(args for args in calls if args[0] == 'rsync' and str(directory / 'snapshot') in args[-2])
             self.assertNotIn('--delete', rsync)
             self.assertEqual(rsync[-1], 'cs.example:/workspaces/.redev/' + 'a' * 32 + '/incoming/' + 'b' * 32 + '/')
             self.assertIn('--checksum', rsync)
@@ -45,6 +45,25 @@ class TransportTest(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 23)
             with patch('redev.transport.subprocess.run', command):
                 self.assertEqual(transport.run({'check': 'types'}), 23)
+
+    def test_runner_upload_uses_rsync_when_gh_scp_rejects_quoted_remote_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            transport = GitHubTransport(Path(temporary))
+            uploaded = []
+            def execute(args, **kwargs):
+                if args[:3] == ['gh', 'codespace', 'cp']:
+                    return subprocess.CompletedProcess(args, 1, '', "scp: dest open quoted remote path: No such file or directory")
+                if '--config' in args:
+                    return subprocess.CompletedProcess(args, 0, 'Host cs.fixture\n User codespace\n', '')
+                if args[0] == 'rsync':
+                    uploaded.append(args)
+                return subprocess.CompletedProcess(args, 0, '', '')
+            with patch('redev.transport.subprocess.run', execute):
+                transport.connect('fixture-space', 'a' * 32)
+            self.assertEqual(len(uploaded), 1)
+            self.assertEqual(Path(uploaded[0][-2]).name, 'runner.py')
+            self.assertEqual(uploaded[0][-1], 'cs.fixture:' + transport.runner)
+            self.assertIn(str(transport.ssh_config), uploaded[0][uploaded[0].index('-e') + 1])
 
 if __name__ == '__main__':
     unittest.main()

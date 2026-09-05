@@ -17,6 +17,9 @@ from redev.worker import watch, worker_health
 
 
 class ExistingCodespaceProvider:
+    def __init__(self):
+        self.state = 'Available'
+
     def account(self):
         return 'fixture-owner'
 
@@ -24,7 +27,7 @@ class ExistingCodespaceProvider:
         return 'fixture/project'
 
     def list_codespaces(self, repository):
-        return [{'name': 'shared-space', 'state': 'Available'}]
+        return [{'name': 'shared-space', 'state': self.state}]
 
     def connect(self, name, identity):
         pass
@@ -163,7 +166,7 @@ class ReviewRegressionTest(unittest.TestCase):
 
         class StoppableProvider(ExistingCodespaceProvider):
             def stop(self, name):
-                pass
+                self.state = 'Shutdown'
 
         store = ObservedStore(self.base / 'repo', self.base / 'state')
         store.save({'enabled': True, 'codespace': 'shared-space',
