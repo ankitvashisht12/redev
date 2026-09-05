@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gh-worktree-cloud"
+version = "0.1.0"
+description = "Local source editing with remote checks and services per Git worktree"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+dependencies = []
+
+[project.scripts]
+gh-worktree-cloud = "worktree_cloud.__main__:main"
+
+[tool.setuptools]
+packages = ["worktree_cloud"]

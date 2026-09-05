@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""GitHub CLI extension entry point; no package install is required."""
+import sys
+from pathlib import Path
+
+if sys.version_info < (3, 11):
+    sys.exit('gh-worktree-cloud requires Python 3.11 or newer')
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from worktree_cloud.__main__ import main
+
+sys.exit(main())
