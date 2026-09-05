@@ -1,54 +1,84 @@
 ---
 name: redev
-description: Use when a local coding agent needs remote checks or development services through gh redev, or a repository has customizations.redev in its devcontainer configuration. Applies to Claude Code and Codex using GitHub Codespaces.
+description: Use when a local coding agent needs selected remote checks or ongoing development services through gh redev, or a repository has customizations.redev in its devcontainer configuration. Applies to Codex and Claude Code using GitHub Codespaces.
 ---
 
 # redev
 
-Edit locally. Run configured heavy checks in this worktree's mapped Codespace.
+Keep source edits and coding agents local. Select the remote mode that matches
+the request: validation that stops, or interactive testing that stays running.
 
-Use Python 3.11 or later, authenticated official GitHub CLI (`gh`), the installed
-`redev` extension, rsync, and OpenSSH. Run commands from the worktree
-root. Inspect `.devcontainer/devcontainer.json`, including
-`customizations.redev`. The CLI validates schema version `1`. Read its
-shell commands before execution in a new repository; configuration is executable
-code. Choose check names from `checks`.
+From the worktree root, inspect `.devcontainer/devcontainer.json` and its
+`customizations.redev` commands. Use configured check names. Check `gh redev
+--help`, `gh redev enabled`, and `gh redev status --json` as needed. `enabled`
+returns 0 for opt-in, 3 for absent/disabled, and another code for an error.
 
-First run `gh redev enabled`. Exit `0` means this worktree is opted in;
-`3` means absent or disabled. Other nonzero exits are errors. Each worktree has
-its own mapping and private state outside the repository.
+Both `check` and `up` can create a billable Codespace or reuse this worktree's
+mapping. Use existing user authorization. `--codespace NAME` selects an existing
+environment in the current account/repository; do not borrow another worktree's
+mapping. A missing mapping does not require starting services first.
 
-| Command | Use |
-| --- | --- |
-| `gh redev up` | Create or reuse the mapping, sync source, start configured services, and start the background watcher and private loopback forwarding. |
-| `gh redev up --port web=13040` | Set the configured `web` port to 13040 locally and remotely. |
-| `gh redev check types` | Run the configured `types` check. Resume an existing opted-in mapping and sync a snapshot first. |
-| `gh redev sync` | Explicitly sync current files. |
-| `gh redev status --json` | Read state, errors, and service URLs without resuming. |
-| `gh redev stop` | Stop watcher, forwarding, and Codespace. Keep data, mapping, and opt-in. |
-| `gh redev disable` | Opt out after the Codespace is stopped. |
+## Selected validation
 
-Use `up` only when the user's scope permits possible billable Codespace creation.
-Reuse existing authorization. If creation is outside that scope, report that
-setup is required. A check without opt-in fails with an `up` instruction; it does
-not create a Codespace. There is no delete command.
+```sh
+gh redev check types unit --stop
+```
 
-The check streams the remote command's output and exit code. If local source
-changes during a check, report the result as stale. A passing remote command then
-returns `75`; a failing command keeps its nonzero exit code with a stale
-annotation. Run the check again after edits are complete before reporting current
-success. On setup, sync, or transport failure, inspect status and report the
-error. Never fall back to local heavy checks.
+Select only applicable checks. This uses a separate validation source directory,
+runs `setup`, `prepare`, and the selected commands, and attempts shutdown after
+success, failure, or a handled interruption. Keep those hooks non-deploying.
+Validation omits `servicePrepare`, services, and browser ports. Tracked generated
+files are inputs; no generated output returns. `--stop` also ends an existing
+interactive session.
 
-Only configured `sync.generated` files return. The CLI compares local content
-with its pre-run state before replacement. If a conflict occurs, retain the local
-edit. Use status's `stateDirectory` to locate the private export. Do not force
-overwrite or publish the export.
+A batch runs in order and records every normal check result, returning the first
+failure. To select tests within one structured `argv` check, append literal
+runner arguments: `gh redev check unit --stop -- -k test_name`. This is not
+supported for shell-string checks or multiple check names.
 
-Remote source excludes `.git`, environment files, keys, and known database directories. Configure
-required secrets remotely through a user-approved provider path. Services pause
-during sync transactions and checks. Use status URLs; distinct worktrees use
-distinct ports, with matching local and remote numbers for browser and SSR use.
+Read the printed private result and output log. Fix failures locally, then rerun
+the selected check to sync and verify the fix. Do not edit remote managed source
+or substitute a local heavy check. If source changed during execution, the
+result is stale: a passing batch returns 75; a failing batch retains its failure
+code. Rerun after edits settle before claiming current success. If blocked,
+report the cause and shutdown state. Verify `stop.confirmed`; a requested stop
+alone does not prove shutdown.
 
-Repository adapters can route selected scripts. They do not intercept compilers:
-direct `tsc`, `npx tsc`, and other package scripts can still execute locally.
+## Interactive testing
+
+```sh
+gh redev up
+gh redev status
+```
+
+Use the printed URLs. `up` starts service preparation, configured services,
+automatic local source sync, and private forwarding. Keep them running until the
+user ends testing. Then run `gh redev stop`. For an explicit port, use
+`up --port web=13040`; local and remote numbers match. `portSchemes` requires the
+service to supply the selected HTTP/HTTPS protocol.
+
+`check` without `--stop` keeps the current mode and leaves the Codespace running.
+In interactive mode, checks pause and restart desired services. `sync.mode:
+"live"` lets ordinary edits reach running watchers; setup changes still restart
+services. Optional service conditions can skip a service; report it as skipped.
+
+## State and limits
+
+Status is passive: provider `Available` and last-observed readiness do not prove
+live application health. Report the actual payer, machine, timeout, and retention
+metadata when relevant. Idle settings apply at creation. `stop` preserves data
+and opt-in; `disable` opts out after stop. There is no automatic deletion on pull
+request closure and no delete command.
+
+Local environment files, credentials, and databases stay excluded. Use native
+personal Codespaces secrets with repository access, or an explicitly supported
+private remote config. Do not copy local `.env` files or print secret values.
+
+Interactive generated return is limited to `sync.generated`. Preserve local
+edits on conflict and inspect the retained private export. `sync.seedGenerated`
+only fills missing remote files from tracked generated inputs. Direct compilers
+and package scripts remain local unless a repository adapter routes them.
+
+Read [configuration and recovery](../../docs/CONFIGURATION.md) for hook timing,
+source rules, and creation recovery. Do not claim that local fixture tests prove
+live Codespaces, forwarding, or application authentication.

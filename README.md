@@ -2,7 +2,7 @@
 
 Keep your editor, source files, and coding agents local. Run configured checks and development services in a GitHub Codespace dedicated to each local Git worktree.
 
-This is an independent GitHub CLI extension. Repositories supply their own commands and environment recipe in `.devcontainer/devcontainer.json`. The extension has no application dependencies. It is a local initial release; it has not been published to a remote repository or package registry.
+This is an independent GitHub CLI extension. Repositories supply their own commands and environment recipe in `.devcontainer/devcontainer.json`. The extension has no application dependencies. Source is available at [ankitvashisht12/redev](https://github.com/ankitvashisht12/redev); installation below uses a local checkout.
 
 ## Install from a local checkout
 
@@ -18,20 +18,43 @@ gh redev --help
 
 GitHub CLI requires a local extension source directory name with a `gh-` prefix. Keep the project folder named `redev` and keep the `../gh-redev` symlink while the extension is installed. If a project selects an older `python3`, the launcher also checks versioned Python 3.11–3.14 executables on `PATH`. Set `REDEV_PYTHON` to select another compatible executable. The executable and Python modules must remain together. A local extension installation refers to this checkout. No pip or npm install is required. Run `gh extension remove redev` to remove the local CLI registration after stopping active environments.
 
-## Use
+## Validate selected changes
 
-From an opted-in repository worktree:
+From a repository worktree with `customizations.redev` configured:
+
+```sh
+gh redev check types unit --stop
+gh redev status --json
+```
+
+`types` and `unit` are example keys. Select the checks that apply to your change from the repository's `checks` object. They run in order against one verified source snapshot. Each check result is recorded; an ordinary check failure does not prevent the remaining selected checks from running. The batch returns its first nonzero check exit code.
+
+`check --stop` creates or reuses this worktree's Codespace, stops any interactive session, and uses a separate validation source directory. It runs `setup`, `prepare`, and the selected checks. It does not start configured services, run `servicePrepare`, or allocate browser ports. Tracked generated files are validation inputs; no generated files return to the local worktree. Keep deployment and service initialization commands out of validation hooks.
+
+After success, failure, or a handled interruption, `--stop` attempts to stop the Codespace and records whether GitHub confirmed shutdown. Read the result before reporting completion. For a failure, fix source locally and repeat the selected check; each retry syncs the new source. No local heavy check runs as a fallback.
+
+Both `check` and `up` can create a billable environment. Use an existing Codespace with `--codespace NAME`, or supply `--branch BRANCH` when the published container recipe is on a specific branch. Existing mappings are reused.
+
+One structured `argv` check can receive test runner arguments after `--`:
+
+```sh
+gh redev check unit --stop -- -k test_name
+```
+
+Arguments are passed literally. This form requires one check defined with an `argv` array; it is not available for a batch or a shell command string.
+
+## Keep services running for testing
 
 ```sh
 gh redev up
-gh redev check types
 gh redev status
+# Edit locally and test through the printed URLs.
 gh redev stop
 ```
 
-`types` is an example configuration key. Use the keys from your repository's `checks` object. `up` opts in, creates or reuses the Codespace, applies current source, starts configured services, and starts one local watcher plus private loopback port forwarding. It can create a billable environment. `check` resumes an existing mapping and synchronizes a verified snapshot before running a command; it never creates a new environment on its own.
+`up` syncs source, runs the configured service preparation, starts services in order, and starts a local watcher plus private loopback forwarding. Keep the environment running during interactive testing. Use `stop` when testing ends. `stop` stops the watcher, forwarding, and Codespace; it keeps data and opt-in. `disable` removes opt-in after a successful stop. The extension has no delete command and does not delete an environment when a pull request closes.
 
-`stop` stops the watcher, forwarding, and Codespace. It preserves remote development data and opt-in. `disable` removes opt-in after a successful stop. The extension has no delete command.
+`check` without `--stop` keeps the current workspace mode. After `up`, it uses the interactive source and restarts desired services after the checks. After a validation run, it keeps using the validation source and leaves the Codespace running. Use `--stop` when you want the complete validation-and-shutdown workflow.
 
 Useful controls:
 
@@ -44,15 +67,19 @@ gh redev status --json
 gh redev enabled
 ```
 
-Each named port uses the same number locally and remotely. This makes browser and server-side localhost URLs consistent. `--no-watch` starts remote services but omits the local watcher and forwarding; use `sync` manually. Port names must exist in the repository configuration. Initial automatic allocation avoids ports reserved by other local worktrees. Existing assignments stay stable; if another application takes a saved port, select a new number explicitly.
+Each named port uses the same number locally and remotely. This makes browser and server-side localhost URLs consistent. `portSchemes` can select HTTPS for a service that already supplies TLS; forwarding does not create certificates. `--no-watch` starts remote services but omits the local watcher and forwarding; use `sync` manually. Initial port allocation avoids local conflicts. Saved assignments stay stable; use `up --port NAME=NUMBER` if another application takes one.
 
-The devcontainer recipe must exist on a published branch before GitHub can build it. `--branch` selects that branch only for initial creation. Source editing and subsequent checks use local snapshots and do not require commits or pushes. Changes to the container image/features require a Codespaces rebuild; source sync cannot rebuild a container.
+The devcontainer recipe must exist on a published branch before GitHub can build it. Branch, machine, and idle timeout settings apply at creation; source sync does not change an existing Codespace's provider settings or rebuild its image. Later edits and checks use local snapshots without commits or pushes. Display names start with the pull request number when one is found, otherwise a branch label, followed by a stable worktree marker.
+
+Use native personal Codespaces secrets with access to this repository for remote environment values. Environment-file sync is not supported: local `.env` files remain excluded. Application adapters decide which remote environment values their services need.
 
 ## What a check means
 
-A check receives one staged source snapshot containing tracked and nonignored untracked files, including local modifications and deletions. Local and remote locks serialize sync and checks. Service watchers stop during the transaction. The next remote source transfer uses a distinct staging directory and a verified manifest, so a lost connection cannot let a retry overwrite a running check's input. rsync uses the existing remote source as a copy basis for incremental transfer; it never receives a broad `--delete` option.
+A check receives one staged source snapshot containing tracked and nonignored untracked files, including local modifications and deletions, subject to the built-in exclusions. Local and remote locks serialize sync and checks. Services stop for check transactions. The remote transfer uses a distinct staging directory and a verified manifest, so a lost connection cannot let a retry overwrite a running check's input. rsync uses the existing source as a copy basis; it does not use a broad `--delete` option. For interactive edits, `sync.mode: "live"` keeps service watchers running when setup inputs are unchanged.
 
-The check streams stdout/stderr and preserves its exit code. If local source changes while it runs, the result is marked stale. A successful stale check returns `75`; a failed stale check retains its failure code. The private `lastCheck.remoteExit` records the actual remote code. Retry after edits settle before reporting current success. Configuration, setup, sync, and connection errors return `70`. Invalid command syntax returns `2`; an interrupted local call returns `130`. `enabled` returns `0` for opt-in, `3` for absent/disabled, or an error code if private state cannot be read. A configured check can also return these numbers; use the error text and `lastCheck` to distinguish them.
+The check streams stdout/stderr and saves private output and result files. The result identifies each command, working directory, exit code, source snapshot, and shutdown outcome. If local source changes while it runs, the result is stale. A successful stale batch returns `75`; a failed stale batch retains its failure code. Retry after edits settle before reporting current success. Configuration, setup, sync, connection, and shutdown failures can return `70`; invalid command syntax returns `2`; an interrupted local call returns `130`. `enabled` returns `0` for opt-in, `3` for absent/disabled, or an error if private state cannot be read. A configured check can return the same numbers; use the result file and error text to identify the cause.
+
+`status` is passive. It reports provider state, payer, machine, idle timeout, retention metadata, and the last observed setup/service state when available. It does not resume the Codespace or prove that an application is currently ready.
 
 Only the extension's commands run remotely. A repository can supply adapters for selected scripts. Direct `tsc`, `npx tsc`, and other commands remain local. The CLI and included skill never silently fall back to a local heavy check.
 

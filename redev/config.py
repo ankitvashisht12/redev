@@ -68,19 +68,42 @@ def known_fields(value, allowed, label):
         raise ConfigError(f'Unknown {label} settings: {", ".join(sorted(unknown))}')
 
 
+def check_command(command):
+    if isinstance(command, str):
+        if not command.strip() or '\x00' in command:
+            raise ConfigError('A shell check must be a nonempty command')
+        return
+    known_fields(command, ['argv', 'cwd'], 'check command')
+    arguments = command.get('argv')
+    if (not isinstance(arguments, list) or not arguments or not arguments[0]
+            or any(not isinstance(argument, str) or '\x00' in argument for argument in arguments)):
+        raise ConfigError('A structured check needs a nonempty argv array of strings')
+    if 'cwd' in command and command['cwd'] != '.':
+        relative_path(command['cwd'])
+
+
+def idle_timeout_minutes(value):
+    match = re.fullmatch(r'(\d+)(m|h)', value) if isinstance(value, str) else None
+    minutes = int(match[1]) * (60 if match[2] == 'h' else 1) if match else 0
+    if not 5 <= minutes <= 240:
+        raise ConfigError('codespace.idleTimeout must be from 5m to 240m (or whole hours up to 4h)')
+    return minutes
+
+
 def validate_config(config):
-    known_fields(config, ['version', 'setup', 'setupInputs', 'prepare', 'checks', 'services', 'ports', 'sync', 'codespace'], 'redev')
+    known_fields(config, ['version', 'setup', 'setupInputs', 'prepare', 'servicePrepare', 'checks', 'services', 'ports', 'portSchemes', 'sync', 'codespace'], 'redev')
     if type(config.get('version')) is not int or config['version'] != 1:
         raise ConfigError('redev.version must be 1')
-    for key in ('setup', 'prepare'):
+    for key in ('setup', 'prepare', 'servicePrepare'):
         if key in config and (not isinstance(config[key], str) or not config[key].strip()):
             raise ConfigError(f'{key} must be a nonempty shell command')
     checks = config.get('checks')
     if not isinstance(checks, dict) or not checks:
         raise ConfigError('checks must contain at least one named command')
     for name, command in checks.items():
-        if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9:_-]*', name) or not isinstance(command, str) or not command.strip():
-            raise ConfigError('Each check needs a valid name and shell command')
+        if not isinstance(name, str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9:_-]*', name):
+            raise ConfigError('Each check needs a valid name')
+        check_command(command)
     ports = config.setdefault('ports', {})
     if not isinstance(ports, dict) or any(not named(name) or type(port) is not int or not 1024 <= port <= 65535 for name, port in ports.items()):
         raise ConfigError('ports must map names to integers from 1024 to 65535')
@@ -88,24 +111,33 @@ def validate_config(config):
         raise ConfigError('Named ports must produce distinct environment variable names')
     if len(set(ports.values())) != len(ports):
         raise ConfigError('Each named port must have a distinct number')
+    schemes = config.get('portSchemes', {})
+    if not isinstance(schemes, dict) or any(name not in ports or scheme not in ('http', 'https') for name, scheme in schemes.items()):
+        raise ConfigError('portSchemes must map configured port names to http or https')
     services = config.setdefault('services', [])
     if not isinstance(services, list):
         raise ConfigError('services must be an array')
     names = set()
     for service in services:
-        known_fields(service, ['name', 'command', 'port', 'readyTimeout'], 'service')
+        known_fields(service, ['name', 'command', 'when', 'port', 'readyTimeout'], 'service')
         name = service.get('name')
         if not named(name) or name in names:
             raise ConfigError('Services need unique names')
         names.add(name)
         if not isinstance(service.get('command'), str) or not service['command'].strip():
             raise ConfigError(f'Service {name} needs a command')
+        if 'when' in service and (not isinstance(service['when'], str) or not service['when'].strip() or '\x00' in service['when']):
+            raise ConfigError(f'Service {name} when must be a nonempty shell command')
         if 'port' in service and service['port'] not in ports:
             raise ConfigError(f'Service {name} refers to an unknown port')
         if type(service.get('readyTimeout', 60)) not in (int, float) or not 1 <= service.get('readyTimeout', 60) <= 600:
             raise ConfigError('readyTimeout must be between 1 and 600 seconds')
     sync = config.setdefault('sync', {})
-    known_fields(sync, ['exclude', 'generated'], 'sync')
+    known_fields(sync, ['exclude', 'generated', 'seedGenerated', 'mode'], 'sync')
+    if type(sync.get('seedGenerated', False)) is not bool:
+        raise ConfigError('sync.seedGenerated must be a boolean')
+    if sync.get('mode', 'restart') not in ('restart', 'live'):
+        raise ConfigError('sync.mode must be restart or live')
     for paths in [config.setdefault('setupInputs', []), sync.setdefault('exclude', []), sync.setdefault('generated', [])]:
         if not isinstance(paths, list):
             raise ConfigError('Path lists must be arrays')
@@ -119,6 +151,8 @@ def validate_config(config):
     for key in ('minimumCpus', 'minimumMemoryGb'):
         if key in codespace and (type(codespace[key]) is not int or codespace[key] < 1):
             raise ConfigError(f'codespace.{key} must be a positive integer')
+    if 'idleTimeout' in codespace:
+        idle_timeout_minutes(codespace['idleTimeout'])
     return config
 
 

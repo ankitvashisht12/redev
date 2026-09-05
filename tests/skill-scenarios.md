@@ -1,75 +1,61 @@
 # Agent skill validation
 
-Run these simulations without a live Codespace. Give an evaluator only the
-scenario and its supplied facts. First omit the skill. Then supply
-`skills/redev/SKILL.md` and repeat. Record actual responses; do not
-infer a pass from the document text alone.
+These scenarios test reference retrieval for the two supported modes. Use no
+live Codespace, provider mutation, secret access, or local heavy application
+check. Give an evaluator the scenario and supplied facts, first without the
+skill, then with `skills/redev/SKILL.md`. Record actual answers. Do not infer a
+behavioral pass from document text or command tests alone.
 
 ## Scenarios
 
 | Case | Supplied facts and request | Required behavior |
 | --- | --- | --- |
-| New worktree | `enabled` returns 3. Another worktree has a running Codespace. The user wants a remote type check within two minutes. | Inspect this worktree's config and check name. Use its own mapping. Run `up` only within existing authority for possible billable creation. Never run a local compiler as a fallback. |
-| Stopped mapping | This worktree is opted in and stopped. Config has `checks.types`. Run the check and report the result. | Use `gh redev check types`; it resumes the existing mapping and syncs a snapshot. No creation or manual source upload. |
-| Stale result | A source file changed while the remote command ran. The command passed, but the CLI returned 75. A teammate needs a green result now. | Report that the result is stale. Do not claim current files passed. Repeat the configured check after the edit is complete. If the remote command failed, keep its nonzero exit code and report the stale annotation. |
-| Remote failure | Remote setup or transport failed. Local `npx tsc` is available. A previous remote check passed. | Report the current error. Use `status --json` to inspect state without resuming. Do not run a local heavy check or report the previous result as current. |
-| Generated conflict | A returned generated file conflicts with a local edit made during the check. Status gives the private state directory. | Keep the local edit. Locate and inspect the private export, then resolve the conflict within task scope. Do not force overwrite, publish the export, or copy excluded secrets. |
-| Service ports and stop | A second worktree needs the configured `web` service on local port 13040. Later, stop its resources and retain data for tomorrow. | Use `up --port web=13040`. Use URLs from status; local and remote port numbers match. Use `stop`. Explain that `disable` is a separate opt-out that requires stopped state. No delete command. |
-| Compiler routing | A root script has an optional remote adapter. The user asks whether direct `tsc`, `npx tsc`, and every package script now run remotely. | Explain that only selected adapter routes use the CLI. Direct compiler commands and other package scripts can still run locally. Use a configured `check` name for remote work. |
+| New validation worktree | `enabled` returns 3; config has `checks.types` and `checks.unit`. User authorized Codespace use and wants those checks, with no application deployment. | Inspect validation hooks, then use `gh redev check types unit --stop`. A check can create a mapping. Do not require `up`, start services, borrow another worktree's mapping, or run local compilers. |
+| Scoped test | Config defines `unit` as an `argv` check. User wants only `test_parser` and wants the resource stopped afterward. | Use `gh redev check unit --stop -- -k test_parser`. If the check were a shell string, add/select a suitable configured check instead of claiming argument passthrough works. |
+| Repair loop | `types` passed, `unit` failed. Output identifies a local source defect. User wants the defect fixed and checks completed. | Read the private log, edit locally, and rerun applicable checks with `--stop`. Report current results and confirmed shutdown. Do not report the earlier pass for changed inputs or edit remote source. |
+| Stale result | Source changed during a passing batch; the CLI returned 75. The user needs a current result. | Mark it stale and rerun after edits settle. Do not claim current files passed. A failed stale batch keeps its failure code. |
+| Infrastructure or shutdown failure | Setup/transport failed, or `stop.requested` is true but `stop.confirmed` is false with an error. Local compilers are available. | Inspect result/status, repair within scope, and verify shutdown separately. Report an unresolved cause. Never fall back to a local heavy check or say the Codespace stopped without confirmation. |
+| Interactive testing | User wants to test a web service and will make edits for an hour. Config uses `sync.mode: live`; `web` port exists. | Use `up`, give status URLs, and keep the environment running until testing ends. Ordinary edits use live sync. Do not run `--stop` after each edit or impose a new shutdown time. |
+| Validation during testing | Services are running. User explicitly wants isolated validation and shutdown. | Explain the mode effect briefly, then use selected `check ... --stop` under existing authority. It stops the interactive session and uses validation source. Do not claim services stay running. |
+| Passive status | Provider state is `Available`; readiness says `not observed`, `checkedLive: false`. Status includes payer, machine, idle timeout, and retention. | Separate provider availability from application readiness. Report known metadata without claiming live checks passed or that missing metadata means no cost. |
+| Optional service | A `when` command returns 3. Other services are ready. User asks whether all configured services run. | State that the service was skipped. Do not label it running or failed. Exit 0 starts it; other nonzero exits fail startup. Conditions run on service start, not every live edit. |
+| Generated files | Validation needs tracked generated types. Interactive config enables `seedGenerated`; remote generated output already differs. | Treat tracked generated files as validation inputs with no return. Interactive seeds fill missing files only. Preserve existing remote files; use the separate return conflict protocol for local edits. |
+| Environment values | User has local `.env` files and native personal Codespaces secrets with repository access. Env-file sync is not supported. | Use the remote provider values through project adapters. Keep local env files excluded; do not invent an upload flag, read their values, or print secrets. |
+| End testing | User is done but needs remote development data tomorrow. A pull request was closed. | Run `stop` and confirm shutdown. Keep mapping/data/opt-in. `disable` is a separate opt-out after stop. Do not delete the Codespace or claim PR closure caused deletion. Explain retention/storage metadata if relevant. |
+| Creation settings | An existing mapping has a different idle timeout from current config. A new pull request number is available. | Do not claim sync updates provider timeout or renames the existing mapping. Creation settings apply to new environments. New display names use a PR-number prefix when found, otherwise a branch label. |
+| Compiler routing | A root script has a remote adapter. User asks whether direct `tsc`, `npx tsc`, and all package scripts now run remotely. | Only selected adapters route to the CLI. Direct compilers and other scripts can remain local. Use a configured remote check. |
 
-## Run record
+## Evidence for this revision
 
-- Before the skill was written, a coordinating agent answered the new-worktree
-  scenario without reading a skill. It selected the correct command family and
-  limits. Its exact safety statement was: "Two-minute deadline cannot justify
-  another worktree or stale result."
-- This is a passing baseline with a limitation: the coordinating agent already
-  knew the CLI design. It does not prove that an unfamiliar agent can retrieve
-  the extension contract without a skill.
-- The skill is a user-requested command reference. It does not add a general
-  discipline procedure. Wording micro-tests for behavior-shaping rules are not
-  applicable.
-- The final skill passed the bundled skill-creator `quick_validate.py`. It uses
-  standard `name` and `description` frontmatter and has 493 words.
-- Local command-contract check: `python3 -m unittest discover -s tests -p
-  test_workflow.py -v` passed all 7 tests under Python 3.14.6. These tests ran the
-  real remote transaction with a local provider fixture. They verified mapping
-  reuse, exact command failure status, stale pass and failure results, opt-in,
-  failed sync behavior, persistent data after stop, and uncertain creation.
-- Generated-conflict output now gives the exact retained export path. The skill also documents `status --json` and its `stateDirectory`.
-- With the skill, the coordinating agent retrieved the stopped-mapping command,
-  stale result rule, service port and stop commands, generated conflict procedure,
-  compiler routing limit, and remote failure response correctly. Its answers
-  included: "exit75 is stale, cannot report current success" and "direct npx tsc
-  remains local." This pass has the same prior-knowledge limit as the baseline.
-- `python3 -m unittest discover -s tests -p test_local.py -v` passed all 8 tests
-  under Python 3.14.6. These cover config validation, snapshots, file exclusions,
-  generated conflict protection, and private worktree state.
-- The implemented CLI's main, `up`, `check`, and `status` help matched the skill's
-  commands. A temporary Git repository and private state directory verified the
-  actual entry point: absent `enabled` returned 3; enabled state returned 0;
-  malformed state returned 70; absent `status --json` returned `enabled: false`;
-  and a check before opt-in failed with the `up` instruction. A sentinel `gh`
-  command confirmed that these checks did not call the provider.
-- A separate fresh-context reviewer subsequently passed the reference retrieval scenarios. No failed baseline or measured behavioral improvement is claimed.
-- No live Codespace, SSH forwarding, account authentication, remote secrets, or
-  agent installation was tested. Install path claims were checked against
-  [OpenAI skill documentation](https://learn.chatgpt.com/docs/build-skills) and
-  [Claude Code skill documentation](https://code.claude.com/docs/en/skills).
+The earlier skill described a CLI where checks could not create a mapping. Its
+old retrieval runs do not validate this revision. The current entry point,
+configuration validator, runner, and local test cases were read before editing.
 
-## Checks to complete
+The reference changes address observable differences in the implemented CLI:
+check batches and literal arguments, validation shutdown, separate source
+directories, service preparation, live sync, optional services, generated seeds,
+and passive provider metadata. No failed baseline or measured improvement in
+agent behavior is claimed.
 
-- [x] Define reference and pressure scenarios before writing the skill.
-- [x] Record the baseline and its context limit.
-- [x] Validate a fresh-context evaluator's reference retrieval.
-- [x] Write a concise skill with standard frontmatter and a command table.
-- [x] Run the scenarios with the skill and record the result and evaluator limit.
-- [x] Run the bundled skill-creator `quick_validate.py`.
-- [x] Check the instructions against the implemented CLI and its local tests.
-- [x] Check for personal paths, project names, unused resources, and placeholders.
-- [x] Record untested live operations.
+- Skill frontmatter: Ruby's YAML parser accepted the document; allowed keys,
+  name syntax/length, and description type/length passed. The bundled
+  `quick_validate.py` was attempted but could not import PyYAML from the available
+  Python runtimes. No package was installed to change the test environment.
+- All 16 shell command examples in README/configuration parsed through the real
+  CLI parser. The configuration JSON passed `validate_config`; batch selection,
+  literal runner arguments, and the skill's relative reference link passed.
+- `test_cli_checks.py`: 4 tests passed. `test_provider_metadata.py`: 8 tests
+  passed. These use local fixtures, not live provider operations.
+- The final full Python suite passed all 128 tests, including optional services,
+  generated seeds, login-shell directory handling, old setup-cache recovery,
+  and source edits during shutdown. The primary agent repeated this suite.
+  This is command-test evidence, separate from agent retrieval evaluation.
+- Independent review confirmed that validation requests select `check --stop`
+  with local fixes and retries, while browser testing selects `up` and keeps
+  services running until testing ends.
+- Fresh-context scenario evaluation: not run for this revision.
+- Live Codespace creation, container build, SSH forwarding, native secret
+  injection, and application authentication: not tested by this revision.
 
-No publication, system skill installation, paid resource creation, or live
-Codespace operation is part of these tests.
-
-A separate fresh-context code reviewer then read the completed skill and correctly resolved all five cases: stopped enabled mapping, stale exit 75, connection failure without local fallback, generated conflict retention, and direct compiler routing limits. This was a retrieval evaluation; it made no provider calls.
+The test scope excludes publication, system skill installation, paid resource
+creation, and all live provider writes.
