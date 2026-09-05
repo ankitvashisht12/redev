@@ -25,10 +25,16 @@ NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
 PROTECTED_PARTS = {
     ".git", ".hg", ".svn", ".ssh", ".aws", ".azure", ".gnupg", ".convex", ".cache",
     ".npm", ".pnpm-store", ".yarn", ".next", ".turbo", ".venv", "venv",
-    "node_modules", "__pycache__", "credentials", "credentials.json",
+    "node_modules", "__pycache__", "credentials.json",
     ".credentials", ".npmrc", ".netrc", ".pypirc", "id_rsa", "id_ed25519",
     "dist", "build", "out", "coverage", ".config", ".vercel",
     ".redev", ".agents", ".claude", ".codex",
+}
+CREDENTIAL_SOURCE_EXTENSIONS = {
+    ".c", ".cc", ".cpp", ".cs", ".css", ".dart", ".ex", ".exs", ".go", ".h", ".hpp",
+    ".html", ".java", ".js", ".jsx", ".mjs", ".cjs", ".kt", ".kts", ".lua", ".php",
+    ".py", ".pyi", ".rb", ".rs", ".scala", ".scss", ".svelte", ".swift", ".ts",
+    ".tsx", ".mts", ".cts", ".vue",
 }
 
 
@@ -48,11 +54,14 @@ def within_prefix(relative, prefix):
     return relative == prefix or relative.startswith(prefix + "/")
 
 
-def protected(relative, prefixes=()):
-    return any(
+def protected(relative, prefixes=(), *, path_prefix=False):
+    parts = relative.split("/")
+    credential_data = (not path_prefix and "credentials" in parts
+                       and Path(parts[-1]).suffix.lower() not in CREDENTIAL_SOURCE_EXTENSIONS)
+    return credential_data or any(
         part in PROTECTED_PARTS or (part.startswith(".env") and part != ".env.example")
         or part.lower().endswith((".pem", ".key", ".p12", ".pfx", ".tsbuildinfo", ".log"))
-        for part in relative.split("/")
+        for part in parts
     ) or any(within_prefix(relative, prefix) for prefix in prefixes)
 
 
@@ -159,7 +168,7 @@ def validate_request(request):
         for value in values:
             relative_path(value)
     for prefix in sync.get("generated", []):
-        if protected(prefix):
+        if protected(prefix, path_prefix=True):
             raise RunnerError("Protected generated path: " + prefix)
     ports = request.get("ports", {})
     if not isinstance(ports, dict):
@@ -583,6 +592,7 @@ def export_generated(base, config, previous):
     output = base / "generated"
     directory(output)
     manifest = {}
+    excluded = config.get("sync", {}).get("exclude", [])
     for prefix in config.get("sync", {}).get("generated", []):
         target = inspect_path(source, prefix)
         if not target.exists():
@@ -598,7 +608,7 @@ def export_generated(base, config, previous):
                 candidates.extend(Path(current) / name for name in files)
         for path in candidates:
             relative = path.relative_to(source).as_posix()
-            if protected(relative):
+            if protected(relative, excluded):
                 raise RunnerError("Protected generated file: " + relative)
             entry = {"sha256": file_hash(path), "mode": 0o755 if path.stat().st_mode & 0o111 else 0o644}
             destination = inspect_path(output, relative)
@@ -608,7 +618,7 @@ def export_generated(base, config, previous):
             manifest[relative] = entry
     for relative in previous.keys() - manifest.keys():
         relative_path(relative)
-        if protected(relative):
+        if protected(relative, excluded):
             continue
         destination = inspect_path(output, relative)
         if destination.exists():

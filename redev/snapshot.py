@@ -21,8 +21,14 @@ class SourceChanged(SnapshotError):
 
 BLOCKED_PARTS = {'.git', '.hg', '.svn', 'node_modules', '.pnpm-store', '.next', '.turbo',
                  'dist', 'build', 'out', 'coverage', '.convex', '.ssh', '.aws', '.azure',
-                 '.config', '.cache', '.gnupg', '.npm', '.yarn', '.venv', 'venv', '__pycache__', 'credentials', '.credentials', '.vercel', '.netrc', '.npmrc', '.pypirc',
+                 '.config', '.cache', '.gnupg', '.npm', '.yarn', '.venv', 'venv', '__pycache__', '.credentials', '.vercel', '.netrc', '.npmrc', '.pypirc',
                  'credentials.json', 'id_rsa', 'id_ed25519', '.redev', '.agents', '.claude', '.codex'}
+CREDENTIAL_SOURCE_EXTENSIONS = {
+    '.c', '.cc', '.cpp', '.cs', '.css', '.dart', '.ex', '.exs', '.go', '.h', '.hpp',
+    '.html', '.java', '.js', '.jsx', '.mjs', '.cjs', '.kt', '.kts', '.lua', '.php',
+    '.py', '.pyi', '.rb', '.rs', '.scala', '.scss', '.svelte', '.swift', '.ts',
+    '.tsx', '.mts', '.cts', '.vue',
+}
 
 
 def under(path, prefixes):
@@ -32,6 +38,7 @@ def under(path, prefixes):
 def sensitive(path):
     parts = path.split('/')
     return (any(part in BLOCKED_PARTS or (part.startswith('.env') and part != '.env.example') for part in parts)
+            or 'credentials' in parts and Path(parts[-1]).suffix.lower() not in CREDENTIAL_SOURCE_EXTENSIONS
             or any(part.lower().endswith(('.pem', '.key', '.p12', '.pfx', '.tsbuildinfo', '.log')) for part in parts))
 
 
@@ -162,7 +169,7 @@ def generated_manifest(root, config):
             relative = path.relative_to(root).as_posix()
             safe_file(root, relative)
             if path.is_file():
-                if sensitive(relative):
+                if sensitive(relative) or under(relative, config.get('sync', {}).get('exclude', [])):
                     raise SnapshotError(f'Generated output contains a protected path: {relative}')
                 records[relative] = file_record(path)
     return records
@@ -171,7 +178,7 @@ def generated_manifest(root, config):
 def accept_generated(root, exported, config, baseline, manifest):
     allowed = config.get('sync', {}).get('generated', [])
     for name in manifest:
-        if not under(name, allowed) or sensitive(name):
+        if not under(name, allowed) or sensitive(name) or under(name, config.get('sync', {}).get('exclude', [])):
             raise SnapshotError(f'Remote generated path is not allowed: {name}')
     actual = generated_manifest(exported, config)
     if actual != manifest:
