@@ -46,9 +46,10 @@ agent behavior is claimed.
   literal runner arguments, and the skill's relative reference link passed.
 - `test_cli_checks.py`: 4 tests passed. `test_provider_metadata.py`: 8 tests
   passed. These use local fixtures, not live provider operations.
-- The final full Python suite passed all 128 tests, including optional services,
+- The final full Python suite passed all 137 tests, including optional services,
   generated seeds, login-shell directory handling, old setup-cache recovery,
-  and source edits during shutdown. The primary agent repeated this suite.
+  source edits during shutdown, and delayed startup connections. The primary
+  agent inspected the test log and repeated the earlier full suite.
   This is command-test evidence, separate from agent retrieval evaluation.
 - Independent review confirmed that validation requests select `check --stop`
   with local fixes and retries, while browser testing selects `up` and keeps
