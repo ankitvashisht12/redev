@@ -98,7 +98,7 @@ class WorkerIntegrationTest(unittest.TestCase):
                    'XDG_STATE_HOME': str(base / 'state'), 'FIXTURE_REMOTE': str(remote), 'FIXTURE_RSYNC': shutil.which('rsync'), 'FIXTURE_PATH': os.environ['PATH']}
             cli = Path(__file__).parents[1] / 'gh-worktree-cloud'
             def invoke(*args):
-                return subprocess.run([sys.executable, str(cli), '--root', str(root), *args], env=env, capture_output=True, text=True, timeout=90)
+                return subprocess.run([str(cli), '--root', str(root), *args], env=env, capture_output=True, text=True, timeout=90)
             try:
                 response = invoke('up')
                 self.assertEqual(response.returncode, 0, response.stdout + response.stderr)

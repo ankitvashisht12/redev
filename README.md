@@ -15,7 +15,7 @@ gh extension install .
 gh worktree-cloud --help
 ```
 
-The executable and Python modules must remain together. A local extension installation refers to this checkout. No pip or npm install is required. Run `gh extension remove worktree-cloud` to remove the local CLI registration after stopping active environments.
+If a project selects an older `python3`, the launcher also checks versioned Python 3.11–3.14 executables on `PATH`. Set `WORKTREE_CLOUD_PYTHON` to select another compatible executable. The executable and Python modules must remain together. A local extension installation refers to this checkout. No pip or npm install is required. Run `gh extension remove worktree-cloud` to remove the local CLI registration after stopping active environments.
 
 ## Use
 
