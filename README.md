@@ -1,4 +1,4 @@
-# gh-worktree-cloud
+# redev
 
 Keep your editor, source files, and coding agents local. Run configured checks and development services in a GitHub Codespace dedicated to each local Git worktree.
 
@@ -9,23 +9,24 @@ This is an independent GitHub CLI extension. Repositories supply their own comma
 Requirements: macOS or Linux, Python 3.11 or later, the official `gh` CLI, Git, OpenSSH, and rsync. Authenticate with `gh auth login`; Codespaces access and an allowed machine are required. The remote devcontainer must provide Python 3.11+, rsync, Bash, and an SSH server, plus the repository's development tools.
 
 ```sh
-CLI_DIR=/absolute/path/to/gh-worktree-cloud
+CLI_DIR=/absolute/path/to/redev
 cd "$CLI_DIR"
-gh extension install .
-gh worktree-cloud --help
+ln -sfn "$PWD" ../gh-redev
+(cd ../gh-redev && gh extension install .)
+gh redev --help
 ```
 
-If a project selects an older `python3`, the launcher also checks versioned Python 3.11–3.14 executables on `PATH`. Set `WORKTREE_CLOUD_PYTHON` to select another compatible executable. The executable and Python modules must remain together. A local extension installation refers to this checkout. No pip or npm install is required. Run `gh extension remove worktree-cloud` to remove the local CLI registration after stopping active environments.
+GitHub CLI requires a local extension source directory name with a `gh-` prefix. Keep the project folder named `redev` and keep the `../gh-redev` symlink while the extension is installed. If a project selects an older `python3`, the launcher also checks versioned Python 3.11–3.14 executables on `PATH`. Set `REDEV_PYTHON` to select another compatible executable. The executable and Python modules must remain together. A local extension installation refers to this checkout. No pip or npm install is required. Run `gh extension remove redev` to remove the local CLI registration after stopping active environments.
 
 ## Use
 
 From an opted-in repository worktree:
 
 ```sh
-gh worktree-cloud up
-gh worktree-cloud check types
-gh worktree-cloud status
-gh worktree-cloud stop
+gh redev up
+gh redev check types
+gh redev status
+gh redev stop
 ```
 
 `types` is an example configuration key. Use the keys from your repository's `checks` object. `up` opts in, creates or reuses the Codespace, applies current source, starts configured services, and starts one local watcher plus private loopback port forwarding. It can create a billable environment. `check` resumes an existing mapping and synchronizes a verified snapshot before running a command; it never creates a new environment on its own.
@@ -35,12 +36,12 @@ gh worktree-cloud stop
 Useful controls:
 
 ```sh
-gh worktree-cloud up --port web=13040
-gh worktree-cloud up --branch remote-development-recipe
-gh worktree-cloud up --no-watch
-gh worktree-cloud sync
-gh worktree-cloud status --json
-gh worktree-cloud enabled
+gh redev up --port web=13040
+gh redev up --branch remote-development-recipe
+gh redev up --no-watch
+gh redev sync
+gh redev status --json
+gh redev enabled
 ```
 
 Each named port uses the same number locally and remotely. This makes browser and server-side localhost URLs consistent. `--no-watch` starts remote services but omits the local watcher and forwarding; use `sync` manually. Port names must exist in the repository configuration. Initial automatic allocation avoids ports reserved by other local worktrees. Existing assignments stay stable; if another application takes a saved port, select a new number explicitly.
@@ -59,23 +60,23 @@ See [configuration](docs/CONFIGURATION.md) for the schema, service contract, sou
 
 ## Agent skill
 
-The generic [worktree-cloud skill](skills/worktree-cloud/SKILL.md) teaches the actual CLI workflow. Install it for either local coding agent, preserving an existing skill folder with the same name:
+The generic [redev skill](skills/redev/SKILL.md) teaches the actual CLI workflow. Install it for either local coding agent, preserving an existing skill folder with the same name:
 
 ```sh
-CLI_DIR=/absolute/path/to/gh-worktree-cloud
+CLI_DIR=/absolute/path/to/redev
 mkdir -p "$HOME/.agents/skills"
-ln -s "$CLI_DIR/skills/worktree-cloud" "$HOME/.agents/skills/worktree-cloud"
+ln -s "$CLI_DIR/skills/redev" "$HOME/.agents/skills/redev"
 mkdir -p "$HOME/.claude/skills"
-ln -s "$CLI_DIR/skills/worktree-cloud" "$HOME/.claude/skills/worktree-cloud"
+ln -s "$CLI_DIR/skills/redev" "$HOME/.claude/skills/redev"
 ```
 
-The first location is for Codex; the second is for Claude Code. Start a new agent session if the skill is not listed. Invoke `$worktree-cloud` in Codex or `/worktree-cloud` in Claude Code. The skill supports the local workflow; it installs no coding agent in a Codespace. Discovery details: [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Claude Code skills](https://code.claude.com/docs/en/skills).
+The first location is for Codex; the second is for Claude Code. Start a new agent session if the skill is not listed. Invoke `$redev` in Codex or `/redev` in Claude Code. The skill supports the local workflow; it installs no coding agent in a Codespace. Discovery details: [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Claude Code skills](https://code.claude.com/docs/en/skills).
 
 ## Development
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q worktree_cloud
+python3 -m compileall -q redev
 ```
 
 Tests use temporary repositories and local processes. Loopback service and watcher tests need permission to open local sockets and inspect child processes. Provider fixtures do not make GitHub requests. They execute the real remote runner, actual source updates, command processes, and local rsync.

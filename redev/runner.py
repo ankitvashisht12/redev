@@ -25,7 +25,7 @@ PROTECTED_PARTS = {
     "node_modules", "__pycache__", "credentials", "credentials.json",
     ".credentials", ".npmrc", ".netrc", ".pypirc", "id_rsa", "id_ed25519",
     "dist", "build", "out", "coverage", ".config", ".vercel",
-    ".worktree-cloud", ".agents", ".claude", ".codex",
+    ".redev", ".agents", ".claude", ".codex",
 }
 
 
@@ -193,7 +193,7 @@ def file_hash(path):
 
 def copy_file(source, destination, entry):
     directory(destination.parent)
-    descriptor, temporary = tempfile.mkstemp(prefix=".wtc-", dir=destination.parent)
+    descriptor, temporary = tempfile.mkstemp(prefix=".redev-", dir=destination.parent)
     try:
         source_descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(source_descriptor, "rb") as source_file, os.fdopen(descriptor, "wb") as output:
@@ -295,11 +295,11 @@ def clean_incoming(base, request):
 
 def command_environment(ports):
     environment = os.environ.copy()
-    environment["WORKTREE_CLOUD_REMOTE"] = "1"
+    environment["REDEV_REMOTE"] = "1"
     for name, port in ports.items():
         suffix = name.upper().replace("-", "_")
-        environment["WTC_PORT_" + suffix] = str(port)
-        environment["WTC_URL_" + suffix] = "http://localhost:" + str(port)
+        environment["REDEV_PORT_" + suffix] = str(port)
+        environment["REDEV_URL_" + suffix] = "http://localhost:" + str(port)
     return environment
 
 

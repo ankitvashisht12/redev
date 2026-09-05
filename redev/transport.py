@@ -66,7 +66,7 @@ class GitHubTransport:
         if not re.fullmatch(r'[a-zA-Z0-9-]+', name) or not re.fullmatch(r'[0-9a-f]{32}', identity):
             raise TransportError('Invalid Codespace mapping')
         self.name = name
-        self.base = f'/workspaces/.worktree-cloud/{identity}'
+        self.base = f'/workspaces/.redev/{identity}'
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         configuration = self.capture(['gh', 'codespace', 'ssh', '--codespace', name, '--config'])
         hosts = re.findall(r'^Host\s+(\S+)\s*$', configuration, re.MULTILINE)

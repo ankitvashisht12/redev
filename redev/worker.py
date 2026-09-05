@@ -51,7 +51,7 @@ def start_worker(store, transport):
     package_root = str(Path(__file__).parents[1])
     python_path = package_root + (os.pathsep + os.environ['PYTHONPATH'] if os.environ.get('PYTHONPATH') else '')
     with open(store.directory / 'worker.log', 'a') as log:
-        process = subprocess.Popen([sys.executable, '-m', 'worktree_cloud', '--root', str(store.root), '_watch', '--token', token],
+        process = subprocess.Popen([sys.executable, '-m', 'redev', '--root', str(store.root), '_watch', '--token', token],
                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
                                    env={**os.environ, 'PYTHONPATH': python_path})
     state['worker'] = {'pid': process.pid, 'token': token}

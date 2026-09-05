@@ -22,7 +22,7 @@ def worktree_id(root):
 
 
 def state_home():
-    return Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'gh-worktree-cloud'
+    return Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'redev'
 
 
 def write_json(path, value):

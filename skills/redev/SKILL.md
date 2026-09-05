@@ -1,32 +1,32 @@
 ---
-name: worktree-cloud
-description: Use when a local coding agent needs remote checks or development services through gh worktree-cloud, or a repository has customizations.worktree-cloud in its devcontainer configuration. Applies to Claude Code and Codex using GitHub Codespaces.
+name: redev
+description: Use when a local coding agent needs remote checks or development services through gh redev, or a repository has customizations.redev in its devcontainer configuration. Applies to Claude Code and Codex using GitHub Codespaces.
 ---
 
-# Worktree Cloud
+# redev
 
 Edit locally. Run configured heavy checks in this worktree's mapped Codespace.
 
 Use Python 3.11 or later, authenticated official GitHub CLI (`gh`), the installed
-`worktree-cloud` extension, rsync, and OpenSSH. Run commands from the worktree
+`redev` extension, rsync, and OpenSSH. Run commands from the worktree
 root. Inspect `.devcontainer/devcontainer.json`, including
-`customizations.worktree-cloud`. The CLI validates schema version `1`. Read its
+`customizations.redev`. The CLI validates schema version `1`. Read its
 shell commands before execution in a new repository; configuration is executable
 code. Choose check names from `checks`.
 
-First run `gh worktree-cloud enabled`. Exit `0` means this worktree is opted in;
+First run `gh redev enabled`. Exit `0` means this worktree is opted in;
 `3` means absent or disabled. Other nonzero exits are errors. Each worktree has
 its own mapping and private state outside the repository.
 
 | Command | Use |
 | --- | --- |
-| `gh worktree-cloud up` | Create or reuse the mapping, sync source, start configured services, and start the background watcher and private loopback forwarding. |
-| `gh worktree-cloud up --port web=13040` | Set the configured `web` port to 13040 locally and remotely. |
-| `gh worktree-cloud check types` | Run the configured `types` check. Resume an existing opted-in mapping and sync a snapshot first. |
-| `gh worktree-cloud sync` | Explicitly sync current files. |
-| `gh worktree-cloud status --json` | Read state, errors, and service URLs without resuming. |
-| `gh worktree-cloud stop` | Stop watcher, forwarding, and Codespace. Keep data, mapping, and opt-in. |
-| `gh worktree-cloud disable` | Opt out after the Codespace is stopped. |
+| `gh redev up` | Create or reuse the mapping, sync source, start configured services, and start the background watcher and private loopback forwarding. |
+| `gh redev up --port web=13040` | Set the configured `web` port to 13040 locally and remotely. |
+| `gh redev check types` | Run the configured `types` check. Resume an existing opted-in mapping and sync a snapshot first. |
+| `gh redev sync` | Explicitly sync current files. |
+| `gh redev status --json` | Read state, errors, and service URLs without resuming. |
+| `gh redev stop` | Stop watcher, forwarding, and Codespace. Keep data, mapping, and opt-in. |
+| `gh redev disable` | Opt out after the Codespace is stopped. |
 
 Use `up` only when the user's scope permits possible billable Codespace creation.
 Reuse existing authorization. If creation is outside that scope, report that

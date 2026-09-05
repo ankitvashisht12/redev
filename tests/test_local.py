@@ -5,9 +5,9 @@ import subprocess
 import tempfile
 import unittest
 
-from worktree_cloud.config import read_config, ConfigError
-from worktree_cloud.snapshot import Snapshot, source_manifest, generated_manifest, accept_generated, SnapshotError
-from worktree_cloud.state import StateStore, worktree_id
+from redev.config import read_config, ConfigError
+from redev.snapshot import Snapshot, source_manifest, generated_manifest, accept_generated, SnapshotError
+from redev.state import StateStore, worktree_id
 
 
 def git(root, *args):
@@ -29,11 +29,11 @@ class Fixture(unittest.TestCase):
         self.write_config()
 
     def write_config(self):
-        (self.root / '.devcontainer/devcontainer.json').write_text(json.dumps({'customizations': {'worktree-cloud': self.config}}))
+        (self.root / '.devcontainer/devcontainer.json').write_text(json.dumps({'customizations': {'redev': self.config}}))
 
     def test_jsonc_namespace_accepts_comments_without_damaging_strings(self):
         path = self.root / '.devcontainer/devcontainer.json'
-        path.write_text('// header\n{"customizations":{"worktree-cloud":{"version":1,"setup":"echo https://host/a,}","checks":{"types":"true",},"services":[],"ports":{},"sync":{},},},}')
+        path.write_text('// header\n{"customizations":{"redev":{"version":1,"setup":"echo https://host/a,}","checks":{"types":"true",},"services":[],"ports":{},"sync":{},},},}')
         self.assertEqual(read_config(self.root)['setup'], 'echo https://host/a,}')
 
     def test_invalid_config_fails_before_any_command(self):

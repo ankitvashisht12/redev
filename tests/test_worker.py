@@ -18,7 +18,7 @@ base = pathlib.Path(os.environ['FIXTURE_REMOTE'])
 state_path = base / 'provider.json'
 state = json.loads(state_path.read_text()) if state_path.exists() else []
 def remote_path(value):
-    return value.replace('/workspaces/.worktree-cloud', str(base / 'worktrees'))
+    return value.replace('/workspaces/.redev', str(base / 'worktrees'))
 if name == 'gh':
     if args[:2] == ['api','user']:
         print('fixture-user')
@@ -83,7 +83,7 @@ class WorkerIntegrationTest(unittest.TestCase):
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
             (root / '.devcontainer').mkdir()
             config = {'version': 1, 'setup': 'true', 'checks': {'types': 'cat live.txt'}, 'services': [], 'ports': ports, 'sync': {}}
-            (root / '.devcontainer/devcontainer.json').write_text(json.dumps({'customizations': {'worktree-cloud': config}}))
+            (root / '.devcontainer/devcontainer.json').write_text(json.dumps({'customizations': {'redev': config}}))
             (root / 'live.txt').write_text('before')
             (root / 'delete.txt').write_text('remove me')
             binaries = base / 'bin'
@@ -96,7 +96,7 @@ class WorkerIntegrationTest(unittest.TestCase):
             remote.mkdir()
             env = {**os.environ, 'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
                    'XDG_STATE_HOME': str(base / 'state'), 'FIXTURE_REMOTE': str(remote), 'FIXTURE_RSYNC': shutil.which('rsync'), 'FIXTURE_PATH': os.environ['PATH']}
-            cli = Path(__file__).parents[1] / 'gh-worktree-cloud'
+            cli = Path(__file__).parents[1] / 'gh-redev'
             def invoke(*args):
                 return subprocess.run([str(cli), '--root', str(root), *args], env=env, capture_output=True, text=True, timeout=90)
             try:

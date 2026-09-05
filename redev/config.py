@@ -69,9 +69,9 @@ def known_fields(value, allowed, label):
 
 
 def validate_config(config):
-    known_fields(config, ['version', 'setup', 'setupInputs', 'prepare', 'checks', 'services', 'ports', 'sync', 'codespace'], 'worktree-cloud')
+    known_fields(config, ['version', 'setup', 'setupInputs', 'prepare', 'checks', 'services', 'ports', 'sync', 'codespace'], 'redev')
     if type(config.get('version')) is not int or config['version'] != 1:
-        raise ConfigError('worktree-cloud.version must be 1')
+        raise ConfigError('redev.version must be 1')
     for key in ('setup', 'prepare'):
         if key in config and (not isinstance(config[key], str) or not config[key].strip()):
             raise ConfigError(f'{key} must be a nonempty shell command')
@@ -126,6 +126,6 @@ def read_config(root):
     path = root / '.devcontainer/devcontainer.json'
     try:
         data = decode_jsonc(path.read_text())
-        return validate_config(data['customizations']['worktree-cloud'])
+        return validate_config(data['customizations']['redev'])
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise ConfigError(f'{path}: {error}') from error

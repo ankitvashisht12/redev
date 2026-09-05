@@ -11,7 +11,7 @@ from .worker import watch
 
 
 def parser():
-    result = argparse.ArgumentParser(prog='gh worktree-cloud', description='Keep source local; run configured checks and services in a Codespace per worktree.')
+    result = argparse.ArgumentParser(prog='gh redev', description='Keep source local; run configured checks and services in a Codespace per worktree.')
     result.add_argument('--version', action='version', version=__version__)
     result.add_argument('--root', type=Path, default=Path.cwd(), help='Worktree directory (default: current directory)')
     commands = result.add_subparsers(dest='command', required=True)
@@ -23,7 +23,7 @@ def parser():
     up.add_argument('--branch', help='Published branch containing the devcontainer recipe for initial creation')
     up.add_argument('--machine', help='Codespaces machine name for initial creation')
     check = commands.add_parser('check', help='Resume, sync, run one configured remote check, preserve its exit code')
-    check.add_argument('name', help='Name from customizations.worktree-cloud.checks')
+    check.add_argument('name', help='Name from customizations.redev.checks')
     commands.add_parser('sync', help='Flush a coherent source snapshot to the mapped environment')
     status = commands.add_parser('status', help='Show mapping, sync state, services, and private URLs; do not resume')
     status.add_argument('--json', action='store_true', help='Print complete machine-readable status')
@@ -79,13 +79,13 @@ def main(argv=None):
         print('Operation interrupted. Inspect status before retrying.', file=sys.stderr)
         return 130
     except (OSError, RuntimeError, ValueError) as error:
-        print(f'worktree-cloud: {error}', file=sys.stderr)
+        print(f'redev: {error}', file=sys.stderr)
         return 70
 
 
 def format_status(status):
     if not status.get('enabled'):
-        return 'This worktree is not enabled. Use gh worktree-cloud up to opt in.'
+        return 'This worktree is not enabled. Use gh redev up to opt in.'
     lines = [f'Worktree: {status["root"]}', f'Codespace: {status.get("codespace", "creation pending")} ({status.get("codespaceState", "unknown")})',
              f'Sync: {status.get("syncStatus", "not started")}; watcher: {"running" if status.get("workerRunning") else "stopped"}']
     for name, url in status.get('urls', {}).items():

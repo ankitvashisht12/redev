@@ -16,7 +16,7 @@ import unittest
 import uuid
 
 
-RUNNER = Path(__file__).resolve().parents[1] / "worktree_cloud" / "runner.py"
+RUNNER = Path(__file__).resolve().parents[1] / "redev" / "runner.py"
 
 
 class RunnerTests(unittest.TestCase):
@@ -203,7 +203,7 @@ class RunnerTests(unittest.TestCase):
         service_code = (
             "import os,socket,time; "
             "server=socket.socket(); server.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); "
-            "server.bind(('127.0.0.1',int(os.environ['WTC_PORT_WEB']))); server.listen(); "
+            "server.bind(('127.0.0.1',int(os.environ['REDEV_PORT_WEB']))); server.listen(); "
             "print('service ready',flush=True); "
             "time.sleep(60)"
         )
@@ -227,8 +227,8 @@ class RunnerTests(unittest.TestCase):
         check_code = (
             "import os,socket; "
             "probe=socket.socket(); "
-            "assert probe.connect_ex(('127.0.0.1',int(os.environ['WTC_PORT_WEB']))) != 0; "
-            "print(os.environ['WORKTREE_CLOUD_REMOTE'],os.environ['WTC_URL_WEB']); "
+            "assert probe.connect_ex(('127.0.0.1',int(os.environ['REDEV_PORT_WEB']))) != 0; "
+            "print(os.environ['REDEV_REMOTE'],os.environ['REDEV_URL_WEB']); "
             "raise SystemExit(9)"
         )
         self.config["checks"]["test"] = shlex.join([sys.executable, "-c", check_code])
@@ -445,7 +445,7 @@ class RunnerTests(unittest.TestCase):
         self.use_service()
         check_port_code = (
             "from pathlib import Path; import os,socket; "
-            "socket.create_connection(('127.0.0.1',int(os.environ['WTC_PORT_WEB']))); "
+            "socket.create_connection(('127.0.0.1',int(os.environ['REDEV_PORT_WEB']))); "
             "Path('second.started').touch(); raise SystemExit(3)"
         )
         self.config["services"].append({"name": "second", "command": shlex.join([sys.executable, "-c", check_port_code])})

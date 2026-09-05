@@ -24,7 +24,7 @@ class Application:
         if state.get('owner') and state['owner'] != owner:
             raise RuntimeError(f'This mapping belongs to GitHub account {state["owner"]}. Restore that gh login.')
         environments = self.transport.list_codespaces(repository)
-        display_name = 'wtc-' + self.store.identity
+        display_name = 'redev-' + self.store.identity
         selected = codespace or state.get('codespace')
         environment = next((item for item in environments if item['name'] == selected), None) if selected else None
         if codespace and not environment:
@@ -38,7 +38,7 @@ class Application:
             environment = matches[0] if matches else None
         if not environment:
             if not create:
-                raise RuntimeError('No Codespace is mapped to this worktree. Run gh worktree-cloud up first.')
+                raise RuntimeError('No Codespace is mapped to this worktree. Run gh redev up first.')
             if state.get('creating') and not replace:
                 raise RuntimeError('A previous creation result is uncertain. Inspect gh codespace list, then use up --codespace NAME or up --replace.')
             state.update(enabled=True, owner=owner, repository=repository, creating=True)
@@ -132,7 +132,7 @@ class Application:
         with self.store.lock():
             state = self.store.read()
             if not state.get('enabled'):
-                raise RuntimeError('This worktree is not enabled. Run gh worktree-cloud up first.')
+                raise RuntimeError('This worktree is not enabled. Run gh redev up first.')
             config = read_config(self.root)
             if name not in config['checks']:
                 raise RuntimeError(f'Unknown check {name!r}. Configured checks: {", ".join(config["checks"])}')
@@ -143,7 +143,7 @@ class Application:
         with self.store.lock():
             state = self.store.read()
             if not state.get('enabled'):
-                raise RuntimeError('Run gh worktree-cloud up first')
+                raise RuntimeError('Run gh redev up first')
             config = read_config(self.root)
             state = self.resolve(config)
             return self.transaction(config, state)
@@ -156,7 +156,7 @@ class Application:
         result = {**state, 'workerRunning': worker_alive(state.get('worker')), 'workerStatus': worker_health(self.store)}
         result['urls'] = {name: f'http://localhost:{port}' for name, port in state.get('ports', {}).items()}
         result['stateDirectory'] = str(self.store.directory)
-        result['remoteDirectory'] = f'/workspaces/.worktree-cloud/{self.store.identity}/source'
+        result['remoteDirectory'] = f'/workspaces/.redev/{self.store.identity}/source'
         try:
             environments = self.transport.list_codespaces(state['repository'])
             environment = next((item for item in environments if item['name'] == state.get('codespace')), None)
@@ -210,7 +210,7 @@ class Application:
         with self.store.lock():
             state = self.store.read()
             if worker_alive(state.get('worker')) or not state.get('stoppedAt'):
-                raise RuntimeError('Run gh worktree-cloud stop before disabling remote routing')
+                raise RuntimeError('Run gh redev stop before disabling remote routing')
             state['enabled'] = False
             self.store.save(state)
         return 0

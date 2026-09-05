@@ -22,7 +22,7 @@ class SourceChanged(SnapshotError):
 BLOCKED_PARTS = {'.git', '.hg', '.svn', 'node_modules', '.pnpm-store', '.next', '.turbo',
                  'dist', 'build', 'out', 'coverage', '.convex', '.ssh', '.aws', '.azure',
                  '.config', '.cache', '.gnupg', '.npm', '.yarn', '.venv', 'venv', '__pycache__', 'credentials', '.credentials', '.vercel', '.netrc', '.npmrc', '.pypirc',
-                 'credentials.json', 'id_rsa', 'id_ed25519', '.worktree-cloud', '.agents', '.claude', '.codex'}
+                 'credentials.json', 'id_rsa', 'id_ed25519', '.redev', '.agents', '.claude', '.codex'}
 
 
 def under(path, prefixes):
@@ -94,7 +94,7 @@ def change_stamp(root, config):
 
 class Snapshot:
     def __init__(self, root, config):
-        self.temporary = tempfile.TemporaryDirectory(prefix='worktree-cloud-snapshot-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='redev-snapshot-')
         self.directory = Path(self.temporary.name)
         try:
             for attempt in range(3):
@@ -166,7 +166,7 @@ def accept_generated(root, exported, config, baseline, manifest):
         expected = baseline.get(name)
         if (file_record(target) if target.exists() else None) != expected:
             raise SnapshotError(f'Local generated file changed: {name}')
-        descriptor, temporary = tempfile.mkstemp(prefix='.worktree-cloud-', dir=target.parent)
+        descriptor, temporary = tempfile.mkstemp(prefix='.redev-', dir=target.parent)
         try:
             with os.fdopen(descriptor, 'wb') as stream:
                 stream.write((exported / name).read_bytes())

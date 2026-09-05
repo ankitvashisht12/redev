@@ -2,7 +2,7 @@
 
 Run these simulations without a live Codespace. Give an evaluator only the
 scenario and its supplied facts. First omit the skill. Then supply
-`skills/worktree-cloud/SKILL.md` and repeat. Record actual responses; do not
+`skills/redev/SKILL.md` and repeat. Record actual responses; do not
 infer a pass from the document text alone.
 
 ## Scenarios
@@ -10,7 +10,7 @@ infer a pass from the document text alone.
 | Case | Supplied facts and request | Required behavior |
 | --- | --- | --- |
 | New worktree | `enabled` returns 3. Another worktree has a running Codespace. The user wants a remote type check within two minutes. | Inspect this worktree's config and check name. Use its own mapping. Run `up` only within existing authority for possible billable creation. Never run a local compiler as a fallback. |
-| Stopped mapping | This worktree is opted in and stopped. Config has `checks.types`. Run the check and report the result. | Use `gh worktree-cloud check types`; it resumes the existing mapping and syncs a snapshot. No creation or manual source upload. |
+| Stopped mapping | This worktree is opted in and stopped. Config has `checks.types`. Run the check and report the result. | Use `gh redev check types`; it resumes the existing mapping and syncs a snapshot. No creation or manual source upload. |
 | Stale result | A source file changed while the remote command ran. The command passed, but the CLI returned 75. A teammate needs a green result now. | Report that the result is stale. Do not claim current files passed. Repeat the configured check after the edit is complete. If the remote command failed, keep its nonzero exit code and report the stale annotation. |
 | Remote failure | Remote setup or transport failed. Local `npx tsc` is available. A previous remote check passed. | Report the current error. Use `status --json` to inspect state without resuming. Do not run a local heavy check or report the previous result as current. |
 | Generated conflict | A returned generated file conflicts with a local edit made during the check. Status gives the private state directory. | Keep the local edit. Locate and inspect the private export, then resolve the conflict within task scope. Do not force overwrite, publish the export, or copy excluded secrets. |

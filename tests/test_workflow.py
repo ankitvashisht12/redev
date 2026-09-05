@@ -7,9 +7,9 @@ import sys
 import tempfile
 import unittest
 
-from worktree_cloud.app import Application
-from worktree_cloud.state import StateStore
-from worktree_cloud.transport import TransportError
+from redev.app import Application
+from redev.state import StateStore
+from redev.transport import TransportError
 
 
 class LocalProvider:
@@ -45,7 +45,7 @@ class LocalProvider:
         shutil.copytree(snapshot, self.base / 'incoming' / transaction_id, dirs_exist_ok=True)
 
     def run(self, request):
-        runner = Path(__file__).parents[1] / 'worktree_cloud/runner.py'
+        runner = Path(__file__).parents[1] / 'redev/runner.py'
         result = subprocess.run([sys.executable, str(runner), str(self.base), 'run'], input=json.dumps(request), text=True)
         if self.after_run:
             self.after_run()
@@ -64,7 +64,7 @@ class LocalProvider:
         self.environments[0]['state'] = 'Shutdown'
 
     def stop_services(self):
-        runner = Path(__file__).parents[1] / 'worktree_cloud/runner.py'
+        runner = Path(__file__).parents[1] / 'redev/runner.py'
         subprocess.run([sys.executable, str(runner), str(self.base), 'stop'], check=True, capture_output=True)
 
 
@@ -80,7 +80,7 @@ class WorkflowTest(unittest.TestCase):
         config = {'version': 1, 'setup': 'echo installed >> install-count', 'setupInputs': ['manifest.txt'],
                   'checks': {'types': 'cat source.txt; exit 23', 'pass': 'cat source.txt'},
                   'services': [], 'ports': {}, 'sync': {'generated': []}}
-        (self.root / '.devcontainer/devcontainer.json').write_text(json.dumps({'customizations': {'worktree-cloud': config}}))
+        (self.root / '.devcontainer/devcontainer.json').write_text(json.dumps({'customizations': {'redev': config}}))
         (self.root / 'source.txt').write_text('uncommitted version')
         (self.root / 'manifest.txt').write_text('dependency lock v1')
         self.store = StateStore(self.root, self.base / 'state')

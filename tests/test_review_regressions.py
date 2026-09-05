@@ -9,11 +9,11 @@ import time
 import unittest
 from unittest.mock import patch
 
-from worktree_cloud.app import Application
-from worktree_cloud.config import read_config
-from worktree_cloud.snapshot import manifest_id, source_manifest
-from worktree_cloud.state import StateStore
-from worktree_cloud.worker import watch, worker_health
+from redev.app import Application
+from redev.config import read_config
+from redev.snapshot import manifest_id, source_manifest
+from redev.state import StateStore
+from redev.worker import watch, worker_health
 
 
 class ExistingCodespaceProvider:
@@ -70,7 +70,7 @@ class ReviewRegressionTest(unittest.TestCase):
         subprocess.run(['git', 'init', '-q', str(root)], check=True)
         (root / '.devcontainer').mkdir()
         config_path = root / '.devcontainer/devcontainer.json'
-        config_text = json.dumps({'customizations': {'worktree-cloud': {
+        config_text = json.dumps({'customizations': {'redev': {
             'version': 1, 'checks': {'types': 'true'}, 'ports': {},
         }}})
         config_path.write_text(config_text)
@@ -112,7 +112,7 @@ class ReviewRegressionTest(unittest.TestCase):
             if ticks >= 3:
                 raise KeyboardInterrupt
 
-        with patch('worktree_cloud.worker.time.sleep', side_effect=next_tick), patch('worktree_cloud.worker.signal.signal'):
+        with patch('redev.worker.time.sleep', side_effect=next_tick), patch('redev.worker.signal.signal'):
             result = watch(application, 'startup-fixture')
         self.assertEqual(result, 0)
         self.assertEqual(application.remote_source, 'edit before watcher started')
@@ -132,7 +132,7 @@ class ReviewRegressionTest(unittest.TestCase):
             elif ticks >= 4:
                 raise KeyboardInterrupt
 
-        with patch('worktree_cloud.worker.time.sleep', side_effect=next_tick), patch('worktree_cloud.worker.signal.signal'):
+        with patch('redev.worker.time.sleep', side_effect=next_tick), patch('redev.worker.signal.signal'):
             result = watch(application, 'recovery-fixture')
         self.assertEqual(result, 0, 'A temporary read error must not terminate the watcher')
         self.assertEqual(application.remote_source, 'edit after config recovered')

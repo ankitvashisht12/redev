@@ -1,6 +1,6 @@
 # Configuration and operation
 
-The extension reads JSON or JSONC from `.devcontainer/devcontainer.json` and validates only `customizations.worktree-cloud`. Other tools use their own namespaces and the standard devcontainer fields. Unknown extension settings fail validation. Configuration contains shell commands: use configuration from repositories you trust.
+The extension reads JSON or JSONC from `.devcontainer/devcontainer.json` and validates only `customizations.redev`. Other tools use their own namespaces and the standard devcontainer fields. Unknown extension settings fail validation. Configuration contains shell commands: use configuration from repositories you trust.
 
 A small generic example:
 
@@ -9,13 +9,13 @@ A small generic example:
   "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "features": { "ghcr.io/devcontainers/features/sshd:1": {} },
   "customizations": {
-    "worktree-cloud": {
+    "redev": {
       "version": 1,
       "setup": "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt",
       "setupInputs": ["requirements.txt"],
       "checks": { "types": ".venv/bin/python -m unittest discover" },
       "services": [
-        { "name": "web", "command": ".venv/bin/python -m http.server $WTC_PORT_WEB --bind 127.0.0.1", "port": "web", "readyTimeout": 30 }
+        { "name": "web", "command": ".venv/bin/python -m http.server $REDEV_PORT_WEB --bind 127.0.0.1", "port": "web", "readyTimeout": 30 }
       ],
       "ports": { "web": 8080 },
       "sync": { "exclude": ["private-data"], "generated": ["generated/client"] },
@@ -44,15 +44,15 @@ Setup reruns when configuration, assigned ports, or the content under `setupInpu
 
 ## Service environment and browser URLs
 
-Commands run in `/workspaces/.worktree-cloud/<worktree-id>/source`, separate from the Codespace's initial Git checkout. They inherit the remote environment and receive:
+Commands run in `/workspaces/.redev/<worktree-id>/source`, separate from the Codespace's initial Git checkout. They inherit the remote environment and receive:
 
 ```text
-WORKTREE_CLOUD_REMOTE=1
-WTC_PORT_WEB=8080
-WTC_URL_WEB=http://localhost:8080
+REDEV_REMOTE=1
+REDEV_PORT_WEB=8080
+REDEV_URL_WEB=http://localhost:8080
 ```
 
-Each configured port creates the matching `WTC_PORT_<NAME>` and `WTC_URL_<NAME>` variables. Service adapters must use the assigned port numbers, including backend and HTTP action listeners. Browser-visible URLs, server-side API URLs, allowed origins, and authentication redirects must agree. Private local forwarding is managed by `gh codespace ports forward`; the extension does not change public port visibility.
+Each configured port creates the matching `REDEV_PORT_<NAME>` and `REDEV_URL_<NAME>` variables. Service adapters must use the assigned port numbers, including backend and HTTP action listeners. Browser-visible URLs, server-side API URLs, allowed origins, and authentication redirects must agree. Private local forwarding is managed by `gh codespace ports forward`; the extension does not change public port visibility.
 
 A named readiness port is a TCP startup check. Configure services so the process stays alive; the extension starts them in order and logs them separately. It stops all service process groups before changing source or running checks, then restarts desired services. This initial version trades uninterrupted browser sessions for a stable check input. Clients may briefly reconnect during edits. Checks run sequentially for this worktree; separate worktrees have separate Codespaces.
 
@@ -68,7 +68,7 @@ A `prepare` or check command can generate files only under the configured return
 
 ## State, recovery, and stopping
 
-Local state is stored with private permissions under `${XDG_STATE_HOME:-$HOME/.local/state}/gh-worktree-cloud/worktrees/<id>`. The ID is the first 32 hexadecimal characters of the SHA-256 of the real worktree root path. State includes the owning GitHub login, Codespace name, assigned ports, sync result, service status, and worker process identity. Tokens remain in `gh`'s credential storage. Moving a worktree creates a new identity; stop it at its old path first.
+Local state is stored with private permissions under `${XDG_STATE_HOME:-$HOME/.local/state}/redev/worktrees/<id>`. The ID is the first 32 hexadecimal characters of the SHA-256 of the real worktree root path. State includes the owning GitHub login, Codespace name, assigned ports, sync result, service status, and worker process identity. Tokens remain in `gh`'s credential storage. Moving a worktree creates a new identity; stop it at its old path first.
 
 `up` writes a creation record before contacting GitHub. It can recover a returned Codespace by its deterministic display name. An uncertain creation response is not retried blindly. Inspect `gh codespace list`, then use `up --codespace NAME` to bind the correct environment, or `up --replace` after confirming no usable environment exists. A missing mapped Codespace also requires explicit replacement. Replacement creates new development state; it cannot recover a deleted database. One local mapping cannot reuse a Codespace already assigned to another local worktree.
 
